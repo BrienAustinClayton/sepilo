@@ -97,3 +97,47 @@ test("the plan prompt limits Sepilo to shopping", async () => {
   assert.match(system, /only help with shopping/);
   assert.match(system, /off_topic/);
 });
+
+const multi = (id: string, title: string, top: string, offers: [string, number][]) => ({
+  ...prod(id, title, offers[0][1], offers[0][0], top),
+  offers: offers.map(([domain, price]) => ({ url: `https://${domain}/${id}`, domain, price: { price, currency: "USD" }, availability: "InStock" })),
+});
+const plan = { topic: "shopping", search: true, query: "usb c cable", max_unit_price: null, quantity: 1 };
+
+test("picks the cheapest store the rules allow and shows the saving", async () => {
+  fake(plan, { picks: [0], reply: "Best price across 3 stores." }, [
+    multi("a", "USB-C Cable A", "electronics", [["target.com", 14], ["baseus.com", 9.5], ["dell.com", 18.25]]),
+  ]);
+  const out = await run("usb c cable");
+  assert.equal(out.products[0].merchant, "baseus.com");
+  assert.equal(out.products[0].price, "9.50");
+  assert.equal(out.products[0].url, "https://baseus.com/a");
+  assert.equal(out.products[0].compare_price, "18.25");
+  assert.equal(out.products[0].store_count, 3);
+  const pickPrompt = calls.filter((c) => c.url.endsWith("/chat/completions"))[1].body.messages[1].content;
+  assert.match(pickPrompt, /\$9\.50 \| baseus\.com .*cheapest of 3 stores/);
+});
+
+test("skips a cheaper store the rules do not allow", async () => {
+  const onlyTarget: Rule[] = [{ categories: ["electronics"], merchants: ["target.com"], remaining: "30.00", currency: "USD" }];
+  fake(plan, { picks: [0], reply: "ok" }, [
+    multi("a", "USB-C Cable A", "electronics", [["baseus.com", 9.5], ["target.com", 14], ["dell.com", 18.25]]),
+  ]);
+  const out = await run("usb c cable", onlyTarget);
+  assert.equal(out.products[0].merchant, "target.com");
+  assert.equal(out.products[0].price, "14.00");
+  assert.equal(out.products[0].compare_price, "18.25");
+  assert.equal(out.products[0].store_count, 3);
+});
+
+test("no comparison price with a single store", async () => {
+  fake(plan, { picks: [0], reply: "ok" }, [prod("a", "USB-C Cable A", 12, "target.com", "electronics")]);
+  const out = await run("usb c cable");
+  assert.equal(out.products[0].compare_price, null);
+  assert.equal(out.products[0].store_count, 1);
+  resetChannel3Guards({ noSleep: true });
+  fake(plan, { picks: [0], reply: "ok" }, [multi("b", "USB-C Cable B", "electronics", [["target.com", 12], ["dell.com", 12]])]);
+  const same = await run("usb c cable");
+  assert.equal(same.products[0].compare_price, null);
+  assert.equal(same.products[0].store_count, 2);
+});

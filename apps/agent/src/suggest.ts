@@ -3,7 +3,7 @@
  * keep only products the agent's spending rules allow, and let the model pick the best few.
  * Rule checks and money are code; the model only rewrites the query and picks indices.
  */
-import { channel3Search, moneyString, toCents, type Product } from "./catalog.ts";
+import { channel3Search, fromCents, moneyString, toCents, type Product, type StoreOffer } from "./catalog.ts";
 import { chatJson } from "./llm.ts";
 import { safeListings } from "./untrusted.ts";
 
@@ -30,6 +30,8 @@ export interface Suggestion {
   category_title?: string;
   image?: string;
   url: string | null;
+  compare_price: string | null;
+  store_count: number;
 }
 
 interface Plan {
@@ -59,7 +61,9 @@ const PICK_SYSTEM =
   "molds, prints, decorations or accessories of the item unless asked. " +
   'Reply with JSON only: {"picks": number[], "reply": string}. picks: up to 4 indices, best first. ' +
   "reply: one or two friendly sentences for the shopper about the picks (mention price range), or, if nothing matches, " +
-  "what was found instead. Do not invent products or prices.";
+  "what was found instead. Each candidate is already listed at its cheapest allowed store; when a candidate says " +
+  '"cheapest of N stores" you may say it is the best price across N stores. Never state a saving, a price other than ' +
+  "the listed one, or a store count that is not listed. Do not invent products or prices.";
 
 const ON_TOPIC = new Set(["shopping", "greeting"]);
 export const OFF_TOPIC_REPLY =
@@ -85,9 +89,19 @@ function allowedBy(p: Product, qty: number, rules: Rule[]): "ok" | "category" | 
   return reason;
 }
 
-const toSuggestion = (p: Product): Suggestion => ({
+interface Priced {
+  product: Product;
+  compare: string | null;
+  stores: number;
+}
+
+const storeOffers = (p: Product): StoreOffer[] =>
+  p.offers && p.offers.length > 0 ? p.offers : [{ merchant: p.merchant, price: p.price, url: p.url }];
+
+const toSuggestion = ({ product: p, compare, stores }: Priced): Suggestion => ({
   product_id: p.product_id, title: p.title, brand: p.brand, price: p.price, currency: p.currency,
   merchant: p.merchant, category: p.category, category_title: p.category_title, image: p.image, url: p.url,
+  compare_price: compare, store_count: stores,
 });
 
 export async function suggest(message: string, history: Turn[], rules: Rule[]): Promise<{ reply: string; products: Suggestion[] }> {
@@ -118,12 +132,26 @@ export async function suggest(message: string, history: Turn[], rules: Rule[]): 
   }
   const reasons = { category: new Set<string>(), store: 0, budget: 0 };
   const allowed: Product[] = [];
+  const priced = new Map<Product, Priced>();
   for (const p of found) {
-    if (toCents(p.price) > capCents) continue;
-    const why = allowedBy(p, qty, rules);
-    if (why === "ok") allowed.push(p);
-    else if (why === "category") reasons.category.add(p.category_title ?? p.category);
-    else reasons[why] += 1;
+    const offers = storeOffers(p);
+    const options = offers.filter((o) => toCents(o.price) <= capCents);
+    if (options.length === 0) continue;
+    const best = options.find((o) => allowedBy({ ...p, merchant: o.merchant, price: o.price }, qty, rules) === "ok");
+    if (!best) {
+      const why = allowedBy({ ...p, merchant: options[0].merchant, price: options[0].price }, qty, rules);
+      if (why === "category") reasons.category.add(p.category_title ?? p.category);
+      else if (why !== "ok") reasons[why] += 1;
+      continue;
+    }
+    const chosen = { ...p, merchant: best.merchant, price: best.price, url: best.url };
+    const highest = Math.max(...offers.map((o) => toCents(o.price)));
+    allowed.push(chosen);
+    priced.set(chosen, {
+      product: chosen,
+      compare: offers.length > 1 && highest > toCents(best.price) ? fromCents(highest) : null,
+      stores: offers.length,
+    });
   }
   if (allowed.length === 0) {
     const parts = [];
@@ -141,8 +169,9 @@ export async function suggest(message: string, history: Turn[], rules: Rule[]): 
   if (candidates.length === 0) {
     return { reply: `I found products for "${query}", but their listings looked unsafe, so I left them out. Try another search.`, products: [] };
   }
+  const stores = (p: Product) => priced.get(p)?.stores ?? 1;
   const list = candidates
-    .map((p, i) => `[${i}] ${p.title.slice(0, 110)}${p.brand ? ` | ${p.brand}` : ""} | $${p.price} | ${p.merchant} | ${p.category_title ?? p.category}`)
+    .map((p, i) => `[${i}] ${p.title.slice(0, 110)}${p.brand ? ` | ${p.brand}` : ""} | $${p.price} | ${p.merchant} | ${p.category_title ?? p.category}${stores(p) > 1 ? ` | cheapest of ${stores(p)} stores` : ""}`)
     .join("\n");
   const pick = await chatJson<{ picks?: unknown; reply?: unknown }>(
     PICK_SYSTEM,
@@ -157,5 +186,5 @@ export async function suggest(message: string, history: Turn[], rules: Rule[]): 
   if (idx.length === 0) {
     return { reply: reply || `Nothing I found for "${query}" really matches what you asked for.`, products: [] };
   }
-  return { reply: reply || "Here's what I found.", products: idx.map((i) => toSuggestion(candidates[i])) };
+  return { reply: reply || "Here's what I found.", products: idx.flatMap((i) => priced.get(candidates[i]) ?? []).map(toSuggestion) };
 }

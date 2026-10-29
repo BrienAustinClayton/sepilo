@@ -6,9 +6,6 @@ so price, store, category, title and page URL come from Channel3, never from the
 - the product must exist and be in stock at the claimed store (one of its Channel3 offers),
 - the agent's unit price must equal that offer's current price,
 - category, title and URL are replaced with Channel3's values (spending rules check the real category).
-
-Web deals (product ids starting "web_", found by app/deals.py) are checked against the stored offer instead: its page is
-re-read fresh through Firecrawl and must still show the stored price and PayPal.
 """
 from __future__ import annotations
 
@@ -24,7 +21,6 @@ from app.channel3 import Channel3Unavailable, get_product
 log = logging.getLogger("intentlock.product_truth")
 
 CENT = Decimal("0.01")
-WEB_PREFIX = "web_"
 _DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
 
 
@@ -61,35 +57,6 @@ def _top_category(raw: dict) -> str:
     return str(top.get("slug") or "other")[:64]
 
 
-def _web_offer(product_id: str, db=None):
-    from app import deals
-
-    return deals.load_offer(product_id, db)
-
-
-def _web_recheck(offer) -> str | None:
-    from app import deals
-
-    return deals.recheck(offer)
-
-
-def _verify_web_line(line: dict, pid: str, name: str, store: str, db) -> dict | str:
-    """A web deal line, or the plain reason it can't be bought: it must be the stored offer, still on its page."""
-    offer = _web_offer(pid, db)
-    if offer is None:
-        return f"{name} isn't a deal Sepilo found."
-    if offer.merchant != store:
-        return f"{name} isn't sold by {store}."
-    real, claimed = _money(offer.price), _money(line.get("unit_price"))
-    if claimed is None or claimed != real or str(line.get("currency") or "USD").upper() != offer.currency:
-        return f"{name} costs ${real} at {store}, not ${claimed}."
-    problem = _web_recheck(offer)
-    if problem:
-        return problem
-    return {**line, "title": offer.title[:300], "category": offer.category or "other", "unit_price": f"{real:.2f}",
-            "currency": offer.currency, "url": _https(offer.url)}
-
-
 def verify_cart(merchant: str, lines: list[dict], db=None) -> tuple[str, list[dict], list[str]]:
     """Return (store, verified lines, page URLs) or raise CartNotVerified with plain reasons."""
     store = domain_of(merchant)
@@ -99,15 +66,6 @@ def verify_cart(merchant: str, lines: list[dict], db=None) -> tuple[str, list[di
     for line in lines:
         pid = str(line.get("product_id") or "")
         name = str(line.get("title") or pid)[:60]
-        if pid.startswith(WEB_PREFIX):
-            verified = _verify_web_line(line, pid, name, store, db)
-            if isinstance(verified, str):
-                reasons.append(verified)
-                continue
-            if verified["url"] and verified["url"] not in pages:
-                pages.append(verified["url"])
-            out.append(verified)
-            continue
         try:
             raw = get_product(pid, db=db, fresh=True)
         except httpx.HTTPStatusError as e:
@@ -156,17 +114,6 @@ class ProductUnavailable(Exception):
         self.reason = reason
 
 
-def _current_web_offer(pid: str, db) -> dict[str, Any]:
-    offer = _web_offer(pid, db)
-    if offer is None:
-        raise ProductUnavailable("This deal can't be checked any more.")
-    problem = _web_recheck(offer)
-    if problem:
-        raise ProductUnavailable(problem)
-    return {"merchant": offer.merchant, "price": f"{_money(offer.price):.2f}", "currency": offer.currency,
-            "url": _https(offer.url), "title": offer.title[:300], "category": offer.category or "other"}
-
-
 def current_offer(product: dict[str, Any], db=None) -> dict[str, Any]:
     """The store and price checkout will confirm for a product, read now from Channel3's product endpoint.
 
@@ -175,8 +122,6 @@ def current_offer(product: dict[str, Any], db=None) -> dict[str, Any]:
     Returns {"merchant", "price", "currency", "url", "title", "category"}.
     """
     pid = str(product.get("product_id") or "")
-    if pid.startswith(WEB_PREFIX):
-        return _current_web_offer(pid, db)
     try:
         raw = get_product(pid, db=db, fresh=True)
     except ValueError:

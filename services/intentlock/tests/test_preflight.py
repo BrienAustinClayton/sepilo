@@ -13,7 +13,7 @@ from conftest import make_capturable_order
 from app import notify, preflight
 from app.config import settings
 from app.ids import new_id
-from app.models import Check, Order, User, WebOffer
+from app.models import Check, Order, User
 from app.paypal import service as paypal_service
 from app.pipeline import core
 from app.preflight import run_preflight
@@ -185,16 +185,6 @@ def test_lab_fixture_pages_pass_only_when_fixtures_are_allowed(db, made):
         made.order.page_urls = [other]
         assert "Store pages use HTTPS" in run_preflight(db, made.order, user_approved=False,
                                                         allow_fixtures=True)["failed"]
-
-
-def test_web_offer_needs_paypal_evidence(db, made):
-    line = {**made.order.cart_json[0], "product_id": "web_abc123"}
-    made.order.cart_json = [line]
-    assert "Store and offer are verifiable" in run_preflight(db, made.order, user_approved=False)["failed"]
-    db.add(WebOffer(product_id="web_abc123", url="https://freshmart.example/p", merchant="freshmart",
-                    title="Milk", price=Decimal("3.50"), paypal_evidence="Pay with PayPal"))
-    db.flush()
-    assert "Store and offer are verifiable" not in run_preflight(db, made.order, user_approved=False)["failed"]
 
 
 def test_a_failed_email_send_fails_the_last_check(db, made, monkeypatch):

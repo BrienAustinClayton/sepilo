@@ -49,6 +49,8 @@ export interface ChatProduct {
   category_title: string | null;
   image: string | null;
   url: string | null;
+  compare_price?: string | null;
+  store_count?: number | null;
 }
 
 export interface ChatMessage {
@@ -166,11 +168,10 @@ export const me = {
   createRequest: (b: { agent_id: string; request_text: string }) => call<PurchaseRequest>("requests", "POST", b),
   runRequest: (requestId: string) => call<AgentRunView>(`requests/${id(requestId)}/run`, "POST"),
   chats: () => call<ChatSummary[]>("chats"),
-  createChat: (agentId?: string, ruleId?: string, agentKind?: AgentKind) =>
+  createChat: (agentId?: string, ruleId?: string) =>
     call<ChatSummary>("chats", "POST", {
       ...(agentId && { agent_id: agentId }),
       ...(ruleId && { mandate_id: ruleId }),
-      ...(agentKind && { agent_kind: agentKind }),
     }),
   chat: (chatId: string) => call<ChatThread>(`chats/${id(chatId)}`),
   setChatRule: (chatId: string, ruleId: string | null) => call<ChatThread>(`chats/${id(chatId)}`, "PATCH", { mandate_id: ruleId }),

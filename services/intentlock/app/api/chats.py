@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app import deals, hosted_agents, runlog, velocity
+from app import hosted_agents, runlog, velocity
 from app.cart_review import review_cart
 from app.product_truth import ProductUnavailable, current_offer
 from app.untrusted import clean, guard_reply, had_hidden_chars, talks_to_agent
@@ -76,6 +76,16 @@ def _clean_url(v: Any, limit: int) -> Optional[str]:
     return v[:limit] if isinstance(v, str) and v.startswith("https://") else None
 
 
+def _compare_price(v: Any, price: str) -> Optional[str]:
+    if not isinstance(v, str) or not PRICE_RE.match(v):
+        return None
+    return v if Decimal(v) > Decimal(price) else None
+
+
+def _store_count(v: Any) -> Optional[int]:
+    return v if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 50 else None
+
+
 def _clean_products(raw: Any) -> list[dict[str, Any]]:
     out = []
     for p in raw if isinstance(raw, list) else []:
@@ -98,6 +108,8 @@ def _clean_products(raw: Any) -> list[dict[str, Any]]:
             "category_title": str(p["category_title"])[:64] if p.get("category_title") else None,
             "image": _clean_url(p.get("image"), 1000),
             "url": _clean_url(p.get("url"), 2048),
+            "compare_price": _compare_price(p.get("compare_price"), price),
+            "store_count": _store_count(p.get("store_count")),
         })
         if len(out) >= MAX_PRODUCTS:
             break
@@ -160,7 +172,6 @@ class ChatCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: Optional[str] = Field(default=None, max_length=64)
     mandate_id: Optional[str] = Field(default=None, max_length=64)
-    agent_kind: Optional[Literal["channel3", "deals"]] = None
 
 
 @router.post("", status_code=201)
@@ -173,7 +184,7 @@ def create_chat(body: ChatCreate, user: User = Depends(current_user), db: Sessio
         hosted_agents.ensure_default_agents(db, user.id)
         agent = db.execute(
             select(Agent).where(Agent.user_id == user.id, Agent.managed.is_(True), Agent.revoked_at.is_(None),
-                                Agent.kind == (body.agent_kind or "channel3"))
+                                Agent.kind == "channel3")
             .order_by(Agent.created_at.desc())
         ).scalars().first()
     if agent is None or not agent.managed or agent.revoked_at is not None:
@@ -279,8 +290,7 @@ def send_message(chat_id: str, body: MessageIn, user: User = Depends(current_use
                      "Add one under Spending rules (categories, stores and a budget) and ask again.")
     else:
         try:
-            data = (deals.suggest(db, user.id, body.content, history, rules) if agent.kind == "deals"
-                    else hosted_agents.suggest(agent.id, body.content, history, rules))
+            data = hosted_agents.suggest(agent.id, body.content, history, rules)
             products = _clean_products(data.get("products"))
             text = guard_reply(data.get("reply")) or (
                 "Here's what I found." if products else "I couldn't find anything that fits.")

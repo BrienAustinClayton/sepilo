@@ -3,8 +3,21 @@
 import React, { useState } from "react";
 import { Check, ExternalLink, ImageOff, ShoppingCart } from "lucide-react";
 import { ProductCardProps } from "../../componentTypes";
+import { ChatProductItem } from "../../types";
 import { Button } from "@/shared/presentation/components/Button";
 import { ButtonVariantEnum } from "@/shared/enums";
+
+function bestPriceLine(product: ChatProductItem): { text: string; tone: string } | null {
+  const stores = product.store_count ?? 0;
+  const parts: string[] = [];
+  if (stores > 1) parts.push(`Best of ${stores} stores`);
+  if (product.compare_price) {
+    const saved = (Math.round(Number(product.compare_price) * 100) - Math.round(Number(product.price) * 100)) / 100;
+    parts.push(`save $${saved.toFixed(2)}`);
+  }
+  if (parts.length === 0) return null;
+  return { text: parts.join(" · "), tone: product.compare_price ? "text-emerald-400" : "text-fg-dim" };
+}
 
 export function ChatProductCard({
   product,
@@ -14,6 +27,7 @@ export function ChatProductCard({
 }: ProductCardProps) {
   const isInCart = inCartCount > 0;
   const [imageLoaded, setImageLoaded] = useState(false);
+  const bestPrice = bestPriceLine(product);
 
   return (
     <div className="saas-card flex sm:flex-col overflow-hidden">
@@ -45,9 +59,12 @@ export function ChatProductCard({
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-1 min-w-0">
-          <span className="text-[15px] sm:text-base font-semibold tabular-nums truncate text-fg">
-            ${product.price}
-          </span>
+          <div className="min-w-0">
+            <span className="block text-[15px] sm:text-base font-semibold tabular-nums truncate text-fg">
+              ${product.price}
+            </span>
+            {bestPrice && <span className={`block text-xs truncate ${bestPrice.tone}`}>{bestPrice.text}</span>}
+          </div>
 
           <div className="flex items-center gap-1 shrink-0">
             {product.url && (

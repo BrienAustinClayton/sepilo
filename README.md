@@ -64,7 +64,7 @@ just before payment (`app/notify.py`); if the email cannot be sent, the order ho
 | Account and address | P21 Verified email on file, P22 Shipping address on file, P23 Shipping address is complete, P24 Shipping country matches your country |
 | Payment | P25 Payment authorization exists |
 | AI results | P26 No prompt injection found, P27 Order matches your request, P28 Store risk is low, P29 No price anomaly |
-| Pages and offers | P30 Store pages use HTTPS, P31 Store and offer are verifiable (web offers need proof the store accepts PayPal) |
+| Pages and offers | P30 Store pages use HTTPS, P31 Store domain is valid |
 | Notice | P32 Payment notice emailed to you |
 
 ---
@@ -86,9 +86,6 @@ graph TD
     Preflight -->|payment notice| Notify["notify.py (email)"]
     Pipeline -->|signed bundle| Proof["proof/sign.py (Ed25519)"]
     API -->|Channel3 API + cache| Catalog["channel3.py"]
-    API -->|Deal Finder| Deals["deals.py"]
-    Deals -->|search + page text| Firecrawl["Firecrawl"]
-    Deals -->|merchant risk, ranking| Graph
     API -->|dispute triage + refund| Disputes["disputes.py"]
     Disputes -->|advice| Jev["Jev"]
     Disputes -->|refund| PayPal
@@ -140,20 +137,14 @@ Seed the fixtures with `scripts/load_lab.py`, then call the endpoint with the op
 
 ---
 
-## Agents, Deals, Disputes and Shipping Address
+## Agents, Disputes and Shipping Address
 
-**Agents.** There is no "create agent". Every user gets two hosted agents
+**Agents.** There is no "create agent". Every user gets one hosted agent
 (`ensure_default_agents` in `services/intentlock/app/hosted_agents.py`): **Sepilo
-Shopper**, which shops the Channel3 catalog, and **Sepilo Deal Finder**, which searches the
-open web through Firecrawl. A new chat picks one of them.
-
-**Deal Finder** (`app/deals.py`). Firecrawl search, then code-first extraction: a page
-becomes an offer only if it is https, the USD price literally appears in the page text, and
-there is PayPal evidence (page text, `paypal.com` links, or a known PayPal store). Hidden
-text and text aimed at an AI agent are dropped. Offers are ranked by Graph RAG
-(query, offer, merchant, PayPal evidence) using merchant risk from `packages/graph`.
-At checkout, `web_` offers are re-read fresh (`app/product_truth.py`) and must still show
-the stored price and PayPal.
+Shopper**, which shops the Channel3 catalog. For each product it picks the cheapest in-stock
+store your spending rules allow and shows the saving against the other stores. Prices and
+savings are computed in code from Channel3 offers, never by the model, and checkout re-reads
+the price from Channel3.
 
 **Disputes** (`app/disputes.py`, `app/api/disputes.py`). Users can dispute a paid order
 within 60 days: one open dispute per order, at most 5 a day. Dispute managers are the
@@ -179,7 +170,7 @@ address in the user's country before any payment.
 
 # 2. Copy env template and fill credentials
 cp services/intentlock/.env.example services/intentlock/.env
-# Edit .env: DATABASE_URL, CHANNEL3_API_KEY, FIRECRAWL_API_KEY, LLM_SMART_KEY, LLM_FAST_KEY,
+# Edit .env: DATABASE_URL, CHANNEL3_API_KEY, LLM_SMART_KEY, LLM_FAST_KEY,
 #            INTENTLOCK_PROOF_PRIVATE_KEY, INTENTLOCK_WALLET_PRIVATE_KEY, WEB_ORIGIN,
 #            DISPUTE_MANAGER_EMAILS (comma-separated; leave empty for no dispute managers)
 
@@ -221,8 +212,7 @@ Planned configuration:
 - **Worker:** Render Background Worker for the 30-min approval timeout job
 - **Web:** Vercel or Render Static Site (Next.js)
 
-Set env vars per `.env.example` (including `FIRECRAWL_API_KEY` for the Deal Finder and
-`DISPUTE_MANAGER_EMAILS` for the dispute queue); set `PAYPAL_MODE=sandbox` once the real PayPal
+Set env vars per `.env.example` (including `DISPUTE_MANAGER_EMAILS` for the dispute queue); set `PAYPAL_MODE=sandbox` once the real PayPal
 Sandbox credentials are ready.
 
 ---
@@ -305,16 +295,8 @@ calls the Channel3 search and product APIs, caches results in the `catalog_cache
 (TTL: 1 hour), and surfaces `GET /catalog?merchant=&category=&q=` to the store and
 agents. Price anomaly detection in `app/checks/intent_diff_rules.py` compares cart unit
 prices against Channel3 offer prices to flag overpriced items. The three merchants are
-`freshmart`, `gadgethub`, and `dealsdaily`. Open-web deals come from Firecrawl instead
-(see Agents, Deals, Disputes and Shipping Address). Note: the `groceries` category in Channel3
+`freshmart`, `gadgethub`, and `dealsdaily`. Note: the `groceries` category in Channel3
 contains toddler food products; Channel3 has no adult grocery category.
-
-### Firecrawl
-
-The Deal Finder (`services/intentlock/app/deals.py`) uses Firecrawl for web search and
-page text (`FIRECRAWL_API_KEY`); the API never fetches store URLs itself. Search results
-are cached for six hours and calls are capped per day. Page text is treated as untrusted
-data, and `web_` offers are re-read through Firecrawl at checkout.
 
 ### LLMs — Jev + Groq
 

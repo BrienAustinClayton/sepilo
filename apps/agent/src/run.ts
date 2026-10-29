@@ -4,7 +4,7 @@ import { newRunContext, runWith, type CartLine, type CheckoutResult } from "./co
 import { Channel3Unavailable } from "./channel3Guard.ts";
 import { ApiError, getIntent } from "./intentlock.ts";
 import { LlmLimitError } from "./llm.ts";
-import { ShopFailure, shop, shopExact, type ExactPick } from "./shop.ts";
+import { ShopFailure, shop, shopExact } from "./shop.ts";
 
 export interface RunResult {
   intent_id: string;
@@ -23,7 +23,9 @@ export interface RunResult {
 const inflight = new Map<string, Promise<RunResult>>();
 
 /** One shopping run for a signed intent. Concurrent calls for the same intent share one run (no double checkout). */
-export function runShopping(intentId: string, exact?: ExactPick[]): Promise<RunResult> {
+export type ExactPick = { productId: string; qty: number }[];
+
+export function runShopping(intentId: string, exact?: ExactPick): Promise<RunResult> {
   if (!/^int_[A-Za-z0-9_]{1,60}$/.test(intentId)) return Promise.reject(new RunError(400, "invalid intent_id"));
   const existing = inflight.get(intentId);
   if (existing) return existing;
@@ -38,7 +40,7 @@ export class RunError extends Error {
   }
 }
 
-async function doRun(intentId: string, exact?: ExactPick[]): Promise<RunResult> {
+async function doRun(intentId: string, exact?: ExactPick): Promise<RunResult> {
   let intent;
   try {
     intent = await getIntent(intentId);
