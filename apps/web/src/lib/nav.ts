@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CreditCard,
   House,
+  MapPin,
   MessagesSquare,
   Receipt,
   ShieldCheck,
@@ -37,6 +38,7 @@ export const NAV: NavSection[] = [
       { href: "/agents", label: "Agents", icon: Bot },
       { href: "/rules", label: "Spending rules", icon: ShieldCheck },
       { href: "/payment", label: "Payment method", icon: CreditCard },
+      { href: "/address", label: "Shipping address", icon: MapPin },
     ],
   },
   {

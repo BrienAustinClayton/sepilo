@@ -19,6 +19,7 @@ from app.access import require_admin
 from app.config import settings, web_origins
 from app.errors import http_exception_handler, unhandled_exception_handler
 from app.api import (
+    address,
     agents,
     auth,
     approvals,
@@ -142,6 +143,7 @@ async def ping() -> dict[str, bool]:
 # ------------------------------------------------------------------ #
 app.include_router(auth.router)
 app.include_router(me.router)
+app.include_router(address.router)
 app.include_router(disputes.me_router)
 app.include_router(disputes.router)
 app.include_router(chats.router)

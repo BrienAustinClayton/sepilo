@@ -2,9 +2,10 @@
 
 import React from "react";
 import Link from "next/link";
-import { ArrowRight, Circle, CircleCheck, MessageSquarePlus, Receipt, TriangleAlert } from "lucide-react";
+import { ArrowRight, Circle, CircleCheck, MapPin, MessageSquarePlus, Receipt, TriangleAlert } from "lucide-react";
 import { OrderCardsMobile } from "@/features/orders/presentation/components/OrderCardsMobile";
 import { OrdersTableDesktop } from "@/features/orders/presentation/components/OrdersTableDesktop";
+import { useMe } from "@/lib/useMe";
 import { useDashboardSummary } from "../../hooks/useDashboardSummary";
 import { SetupStep, StatCardProps } from "../../types";
 
@@ -20,6 +21,8 @@ function StatCard({ label, value, hint }: StatCardProps) {
 
 export function DashboardPage() {
   const { summary } = useDashboardSummary();
+  const me = useMe();
+  const needsAddress = me !== null && me.has_address === false;
 
   const steps: SetupStep[] = summary
     ? [
@@ -66,6 +69,24 @@ export function DashboardPage() {
           Start shopping
         </Link>
       </div>
+
+      {needsAddress && (
+        <div className="saas-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border-blue-500/30 bg-blue-500/5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+              <MapPin className="w-4 h-4" strokeWidth={1.8} />
+            </span>
+            <div>
+              <div className="text-sm font-medium text-fg">Add your shipping address.</div>
+              <div className="text-xs text-fg-muted">Sepilo won&apos;t pay for any order without one.</div>
+            </div>
+          </div>
+          <Link href="/address" className="intentlock-btn-primary btn-sm">
+            Add address
+            <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.8} />
+          </Link>
+        </div>
+      )}
 
       {hasNeedsApproval && summary && (
         <div className="saas-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border-amber-500/30 bg-amber-500/5">

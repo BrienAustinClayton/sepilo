@@ -124,6 +124,7 @@ def user_dto(user: User) -> dict[str, Any]:
         "currency": user.currency,
         "company": user.company,
         "onboarding": user.onboarding,
+        "has_address": bool(user.shipping_address),
         "next": next_step(user),
         "role": "dispute_manager" if is_dispute_manager(user) else "user",
     }
