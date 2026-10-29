@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, FileCheck2, Shield, Wallet } from "lucide-react";
+import { RaiseDisputeSection } from "@/features/disputes/presentation/components/RaiseDisputeSection";
 import { OrderStatusEnum } from "../../enums";
 import { useOrdersManagement } from "../../hooks/useOrdersManagement";
 import { OrderDetailPageProps } from "../../pageTypes";
@@ -131,6 +132,8 @@ export function OrderDetailPage({ orderId }: OrderDetailPageProps) {
             </div>
             <SecurityChecksTimeline checks={checks} />
           </div>
+
+          <RaiseDisputeSection orderId={order.id} isPaid={order.status === OrderStatusEnum.Captured} />
 
           <Link href={`/proof/${order.id}`} className="saas-card flex items-center gap-3 px-5 py-4 hover:border-blue-500/40 transition">
             <FileCheck2 className="w-4 h-4 text-blue-400 shrink-0" strokeWidth={1.8} />

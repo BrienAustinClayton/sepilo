@@ -1,4 +1,4 @@
-import { CartItemDetails, OrderSummary, SecurityCheckRecord } from "./types";
+import { CartItemDetails, OrderSummary, PreflightSummary, SecurityCheckRecord } from "./types";
 
 export interface OrdersListProps {
   orders: OrderSummary[];
@@ -24,4 +24,8 @@ export interface OrderApprovalActionsProps {
   onApprove: (confirmTotal?: string) => void;
   onDecline: () => void;
   isProcessing: boolean;
+}
+
+export interface PreflightChecklistProps {
+  summary: PreflightSummary;
 }

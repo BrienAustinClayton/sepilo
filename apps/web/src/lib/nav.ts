@@ -7,6 +7,7 @@ import {
   House,
   MessagesSquare,
   Receipt,
+  Scale,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +40,10 @@ export const NAV: NavSection[] = [
       { href: "/rules", label: "Spending rules", icon: ShieldCheck },
       { href: "/payment", label: "Payment method", icon: CreditCard },
     ],
+  },
+  {
+    title: "Support",
+    items: [{ href: "/disputes", label: "Disputes", icon: Scale }],
   },
   {
     title: "Tools",

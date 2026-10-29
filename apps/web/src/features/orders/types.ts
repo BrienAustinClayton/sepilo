@@ -1,6 +1,7 @@
 import {
   ApprovalDecisionEnum,
   OrderStatusEnum,
+  PreflightStatusEnum,
   SecurityCheckResultEnum,
   SecurityCheckStepEnum,
 } from "./enums";
@@ -18,7 +19,20 @@ export interface SecurityCheckRecord {
   result: SecurityCheckResultEnum;
   latency_ms: number;
   timestamp: string;
-  details: Record<string, string | number | boolean | null> | null;
+  details: Record<string, unknown> | null;
+}
+
+export interface PreflightItem {
+  id: string;
+  label: string;
+  status: PreflightStatusEnum;
+  detail: string;
+}
+
+export interface PreflightSummary {
+  items: PreflightItem[];
+  passed: number;
+  total: number;
 }
 
 export interface OrderApprovalRecord {
