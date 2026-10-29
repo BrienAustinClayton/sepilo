@@ -151,35 +151,10 @@ def _seed(db):
 
 
 def _pending_order(db, *, expires_in_min: int = 30) -> tuple[Order, Approval]:
-    """Create an order in pending_approval with a mock authorization_id."""
-    u, a, i = _seed(db)
-    now = utcnow()
-    oid = new_id("ord")
-    auth_id = "MOCK-A-" + oid[-8:]
-    o = Order(
-        id=oid, intent_id=i.id, agent_id=a.id, user_id=u.id,
-        merchant="freshmart",
-        cart_json=[{"product_id": "p_milk", "title": "Whole Milk 1L", "qty": 1,
-                    "unit_price": "3.50", "currency": "USD", "category": "groceries"}],
-        total=Decimal("3.50"), currency="USD",
-        status="pending_approval", decision="hold", reasons=["needs review"],
-        paypal_order_id="MOCK-O-" + oid[-8:], authorization_id=auth_id,
-    )
-    db.add(o)
-    db.flush()
-    appr = Approval(
-        id=new_id("apr"), order_id=oid,
-        requested_at=now,
-        expires_at=now + timedelta(minutes=expires_in_min),
-        decision=None, decided_at=None,
-    )
-    db.add(appr)
-    db.flush()
-    # Register the mock authorization so capture/void work.
-    from app.paypal.service import _AUTH, _LOCK
-    with _LOCK:
-        _AUTH[auth_id] = "authorized"
-    return o, appr
+    """Create an order in pending_approval that passes every payment check, with a mock authorization."""
+    from conftest import make_capturable_order
+    made = make_capturable_order(db, expires_in_min=expires_in_min)
+    return made.order, made.approval
 
 
 # --------------------------------------------------------------------------- #

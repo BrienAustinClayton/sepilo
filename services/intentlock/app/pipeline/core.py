@@ -23,6 +23,7 @@ from app.pipeline.steps import (
     intent_diff_result, ms_since, record_check, record_skipped, set_status,
 )
 from app.policy import decide
+from app.preflight import TOTAL_CHECKS, preflight_details, run_preflight
 from app.signing import iso_z, utcnow
 from app.velocity import PENDING_APPROVALS_PER_AGENT, pending_approvals
 
@@ -33,6 +34,7 @@ CHECKOUT_FAILED_REASON = "Checkout could not be completed"
 PIPELINE_HOLD_REASON = "Policy check could not be completed; needs your review"
 NO_SAVED_PAYMENT = "no_payment_token"
 TOO_MANY_PENDING_REASON = "Too many orders from this agent are already waiting for your approval"
+PREFLIGHT_ERROR_REASON = "Security checks could not be completed"
 
 
 class Executor(Protocol):
@@ -256,6 +258,24 @@ async def resume_after_payment(db, order_id: str, executor, *, allow_fixtures: b
         return _recover(db, order_id, history)
 
 
+async def _preflight_gate(db, order, reasons: list[str], allow_fixtures: bool = False) -> tuple[str, list[str]]:
+    """The 32 payment checks. They can only turn a capture into a hold, never anything into a capture."""
+    t0 = time.perf_counter()
+    try:
+        result = await asyncio.to_thread(run_preflight, db, order, user_approved=False, allow_fixtures=allow_fixtures)
+    except Exception:
+        log.exception("pipeline.preflight_error order_id=%s", order.id)
+        db.rollback()
+        record_check(db, order.id, "preflight", "fail",
+                     {"error": "preflight_error", "passed": 0, "total": TOTAL_CHECKS}, ms_since(t0))
+        return "hold", reasons + [PREFLIGHT_ERROR_REASON]
+    record_check(db, order.id, "preflight", "pass" if result["passed"] else "fail",
+                 preflight_details(result), ms_since(t0))
+    if result["passed"]:
+        return "capture", reasons
+    return "hold", reasons + result["failed"]
+
+
 async def _check_and_settle(db, order, ex, intent, mandate, agent, verify, mandate_out, auth_id,
                             allow_fixtures, history) -> CheckoutOutcome:
     # Block 4: parallel AI checks
@@ -281,6 +301,8 @@ async def _check_and_settle(db, order, ex, intent, mandate, agent, verify, manda
         # Approval fatigue: don't queue yet another order for a human who already has a pile to review.
         decision = "void"
         reasons.append(TOO_MANY_PENDING_REASON)
+    if decision == "capture":
+        decision, reasons = await _preflight_gate(db, order, reasons, allow_fixtures)
     record_check(db, order.id, "decide", decision_result(decision),
                  {"decision": decision, "reasons": reasons}, ms_since(t0))
     order.decision = decision

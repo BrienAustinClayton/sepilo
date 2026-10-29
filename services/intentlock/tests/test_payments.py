@@ -122,41 +122,10 @@ def _seed(db):
 
 
 def _pending_order(db, *, expires_in_min: int = 30) -> tuple[Order, Approval]:
-    """Create an order already in pending_approval with a registered mock auth."""
-    u, a = _seed(db)
-    # Approval endpoint does not check the intent signature, so a placeholder is fine.
-    i = Intent(
-        id=new_id("int"), user_id=u.id, agent_id=a.id,
-        request_text="buy groceries", signature="sig", signed_at=utcnow(),
-    )
-    db.add(i)
-    db.flush()
-    now = utcnow()
-    oid = new_id("ord")
-    auth_id = "MOCK-A-" + oid[-8:]
-    o = Order(
-        id=oid, intent_id=i.id, agent_id=a.id, user_id=u.id,
-        merchant="freshmart",
-        cart_json=[{"product_id": "p_milk", "title": "Whole Milk 1L", "qty": 1,
-                    "unit_price": "3.50", "currency": "USD", "category": "groceries"}],
-        total=Decimal("3.50"), currency="USD",
-        status="pending_approval", decision="hold", reasons=["needs review"],
-        paypal_order_id="MOCK-O-" + oid[-8:], authorization_id=auth_id,
-    )
-    db.add(o)
-    db.flush()
-    appr = Approval(
-        id=new_id("apr"), order_id=oid,
-        requested_at=now,
-        expires_at=now + timedelta(minutes=expires_in_min),
-        decision=None, decided_at=None,
-    )
-    db.add(appr)
-    db.flush()
-    # Register the authorization in the mock so capture/void work.
-    with paypal_service._LOCK:
-        paypal_service._AUTH[auth_id] = "authorized"
-    return o, appr
+    """Create an order already in pending_approval that passes every payment check, with a registered mock auth."""
+    from conftest import make_capturable_order
+    made = make_capturable_order(db, expires_in_min=expires_in_min)
+    return made.order, made.approval
 
 
 def _received_order(db, *, unit_price: str = "3.50") -> str:

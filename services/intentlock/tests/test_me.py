@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app import auth
+from conftest import prepare_capturable  # noqa: E402
 from app.ids import new_id
 from app.models import Order, User
 
@@ -632,6 +633,7 @@ def test_large_approval_needs_the_total_typed(client, db, two):
     intent = client.post("/me/requests", headers=ha, json={"agent_id": agent["id"], "request_text": "a laptop"}).json()
     held = _order(db, alice, intent["id"], agent["id"], "pending_approval", total="899.00")
     held.authorization_id = "MOCK-A-X"
+    prepare_capturable(db, held)
     db.add(Approval(id=new_id("apr"), order_id=held.id, requested_at=utcnow(),
                     expires_at=utcnow() + timedelta(minutes=10)))
     db.commit()

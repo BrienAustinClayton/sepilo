@@ -23,6 +23,7 @@ SERVICE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = SERVICE_ROOT.parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
+from conftest import buyer_fields  # noqa: E402
 from app.checks import injection_rules  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.crypto.http_sig import sign_request  # noqa: E402
@@ -155,7 +156,7 @@ MILK = {"product_id": "p_milk", "title": "Whole Milk 1L", "variant": "1L", "qty"
 @pytest.fixture()
 def seed(db):
     priv, pub = generate_keypair_b64()
-    u = User(id=new_id("usr"), name="Priya")
+    u = User(id=new_id("usr"), name="Priya", **buyer_fields())
     db.add(u)
     db.flush()
     a = Agent(id=new_id("agt"), user_id=u.id, name="shopper", public_key=pub, device_id="dev1", verified=True)

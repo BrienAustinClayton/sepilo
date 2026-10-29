@@ -12,6 +12,7 @@ from sqlalchemy import select
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SERVICE_ROOT))
 
+from conftest import buyer_fields  # noqa: E402
 from app.api import lab as lab_mod  # noqa: E402
 from app.checks import intent_diff as intent_diff_mod  # noqa: E402
 from app.crypto.keys import generate_keypair_b64  # noqa: E402
@@ -71,7 +72,7 @@ def lab_env(db, client, monkeypatch, tmp_path):
     priv, pub = generate_keypair_b64()
     monkeypatch.setenv("AGENT_PRIVATE_KEY", priv)
     if db.get(User, PRIYA) is None:
-        db.add(User(id=PRIYA, name="Priya", paypal_payment_token="tok_test"))
+        db.add(User(id=PRIYA, name="Priya", paypal_payment_token="tok_test", **buyer_fields()))
         db.flush()
     _upsert_agent(db, "agt_demo_shopper", pub, "dev_priya_macbook", verified=True)
     _upsert_agent(db, "agt_lab_revoked", VECTOR_PUBLIC_KEY, "dev_priya_macbook", verified=True, revoked=True)
