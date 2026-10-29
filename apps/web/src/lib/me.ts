@@ -155,7 +155,6 @@ export const me = {
   order: (orderId: string) => call<GetOrderResponse>(`orders/${id(orderId)}`),
   approve: (orderId: string, req: OrderApprovalRequest) => call<Order>(`orders/${id(orderId)}/approval`, "POST", req),
   agents: () => call<MyAgent[]>("agents"),
-  createHostedAgent: (name: string) => call<MyAgent>("agents/hosted", "POST", { name }),
   connectAgent: (b: { name: string; public_key: string; device_id?: string }) => call<MyAgent>("agents", "POST", b),
   revokeAgent: (agentId: string) => call<MyAgent>(`agents/${id(agentId)}/revoke`, "POST"),
   rules: () => call<Mandate[]>("mandates"),

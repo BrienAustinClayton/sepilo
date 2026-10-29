@@ -16,6 +16,3 @@ export interface ConnectAgentPayload {
   device_id: string | null;
 }
 
-export interface CreateHostedAgentPayload {
-  name: string;
-}

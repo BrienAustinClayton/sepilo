@@ -3,7 +3,6 @@ import {
   Bot,
   CalendarClock,
   CreditCard,
-  FlaskConical,
   House,
   MessagesSquare,
   Receipt,
@@ -39,10 +38,6 @@ export const NAV: NavSection[] = [
       { href: "/rules", label: "Spending rules", icon: ShieldCheck },
       { href: "/payment", label: "Payment method", icon: CreditCard },
     ],
-  },
-  {
-    title: "Tools",
-    items: [{ href: "/lab", label: "Attack simulator", icon: FlaskConical }],
   },
   {
     title: "In development",

@@ -13,12 +13,6 @@ export default function ConsolePage() {
             Real-time fraud telemetry, risk scores, and autonomous decision oversight.
           </p>
         </div>
-        <Link
-          href="/lab"
-          className="intentlock-btn-primary"
-        >
-          Simulate in Lab
-        </Link>
       </div>
 
       {/* Metrics Grid */}
