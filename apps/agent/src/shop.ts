@@ -115,11 +115,40 @@ export async function shop(intentId: string, request: string): Promise<ShopOutco
   return { checkout: result, summary };
 }
 
-/** Approved cart from one store: buy exactly these products, re-read from Channel3 for the current price. */
-export async function shopExact(intentId: string, picks: { productId: string; qty: number }[]): Promise<ShopOutcome> {
-  const products = await Promise.all(picks.map((p) => channel3Get(p.productId)));
+export interface WebSnapshot {
+  title: string;
+  price: string;
+  merchant: string;
+  url: string;
+  category: string;
+}
+
+export interface ExactPick {
+  productId: string;
+  qty: number;
+  snapshot?: WebSnapshot;
+}
+
+const WEB_PREFIX = "web_";
+
+function webProduct(productId: string, s: WebSnapshot): Product {
+  return {
+    product_id: productId, merchant: s.merchant, category: s.category, title: s.title, price: moneyString(s.price),
+    currency: "USD", url: s.url, page_candidates: [s.url], variants: [], source: "web",
+  };
+}
+
+async function exactProduct(p: ExactPick): Promise<Product | null> {
+  if (!p.productId.startsWith(WEB_PREFIX)) return channel3Get(p.productId);
+  return p.snapshot ? webProduct(p.productId, p.snapshot) : null;
+}
+
+/** Approved cart from one store: buy exactly these products. Channel3 items are re-read for the current price; web
+ *  deals use the API's snapshot, and the API re-verifies every line at checkout. */
+export async function shopExact(intentId: string, picks: ExactPick[]): Promise<ShopOutcome> {
+  const products = await Promise.all(picks.map(exactProduct));
   const missing = products.findIndex((p) => !p);
-  if (missing >= 0) throw new ShopFailure("An item in your cart is no longer available on Channel3. Remove it and try again.");
+  if (missing >= 0) throw new ShopFailure("An item in your cart is no longer available. Remove it and try again.");
   const stores = new Set(products.map((p) => p!.merchant));
   if (stores.size > 1) throw new ShopFailure("These items come from different stores; each store is checked out separately.");
   remember(products as Product[]);

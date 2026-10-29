@@ -19,18 +19,19 @@ import httpx
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app import runlog
 from app.config import settings
 from app.crypto.keys import generate_keypair_b64
 from app.db import new_session
 from app.ids import new_id
-from app.models import Agent, AgentRun, Order
+from app.models import Agent, AgentRun, Order, WebOffer
 
 log = logging.getLogger("intentlock.hosted_agents")
 
 RUN_TIMEOUT_S = 300
+DEFAULT_AGENTS = (("channel3", "Sepilo Shopper"), ("deals", "Sepilo Deal Finder"))
 STALE_AFTER = timedelta(minutes=10)
 UNSENT_GRACE = timedelta(seconds=15)
 
@@ -68,12 +69,26 @@ def unseal(sealed: str, agent_id: str) -> str:
     return _aead().decrypt(raw[:12], raw[12:], agent_id.encode()).decode()
 
 
-def new_hosted_agent(user_id: str, name: str) -> Agent:
+def new_hosted_agent(user_id: str, name: str, kind: str = "channel3") -> Agent:
     agent_id = new_id("agt")
     private_b64, public_b64 = generate_keypair_b64()
     return Agent(id=agent_id, user_id=user_id, name=name, public_key=public_b64,
-                 device_id="intentlock-hosted", verified=True, managed=True,
+                 device_id="intentlock-hosted", verified=True, managed=True, kind=kind,
                  secret_enc=seal(private_b64, agent_id))
+
+
+def ensure_default_agents(db, user_id: str) -> None:
+    """Give every user the two Sepilo agents. A kind the user already has (even a disconnected one) is left alone."""
+    try:
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"default-agents:{user_id}"))))
+        have = set(db.execute(select(Agent.kind).where(Agent.user_id == user_id, Agent.managed.is_(True))).scalars())
+        for kind, name in DEFAULT_AGENTS:
+            if kind not in have:
+                db.add(new_hosted_agent(user_id, name, kind))
+        db.commit()
+    except HostedAgentError:
+        db.rollback()
+        log.warning("hosted_agents.defaults_skipped user=%s", user_id)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -137,6 +152,27 @@ def _claim(db, run_id: str, endpoint: str) -> bool:
     return got is not None
 
 
+def _web_snapshot(db, product_id: str) -> dict[str, Any] | None:
+    offer = db.get(WebOffer, product_id)
+    if offer is None:
+        return None
+    return {"title": offer.title, "price": f"{Decimal(offer.price):.2f}", "merchant": offer.merchant,
+            "url": offer.url, "category": offer.category or "other"}
+
+
+def _run_items(db, run: AgentRun) -> dict[str, Any]:
+    """What the agent should buy; web deals carry a snapshot (the agent can't look them up, and checkout re-verifies)."""
+    if run.items:
+        return {"items": [{**i, "snapshot": _web_snapshot(db, str(i.get("product_id")))}
+                          if str(i.get("product_id", "")).startswith("web_") else i for i in run.items]}
+    if run.product_id:
+        if run.product_id.startswith("web_"):
+            return {"items": [{"product_id": run.product_id, "qty": run.qty or 1,
+                               "snapshot": _web_snapshot(db, run.product_id)}]}
+        return {"product_id": run.product_id, "qty": run.qty or 1}
+    return {}
+
+
 def execute_run(run_id: str, db=None) -> None:
     """Ask the hosted agent service to shop for one purchase request and record what came back."""
     own = db is None
@@ -156,7 +192,7 @@ def execute_run(run_id: str, db=None) -> None:
             key = unseal(agent.secret_enc, agent.id)
         except Exception:
             log.exception("hosted_agents.unseal_failed agent=%s", agent.id)
-            return _finish(db, run, "failed", "The agent's key couldn't be read. Create a new hosted agent.")
+            return _finish(db, run, "failed", "The agent's key couldn't be read. Try another agent.")
         endpoint = f"{url.rstrip('/')}/run"
         if not _claim(db, run.id, endpoint):
             return
@@ -168,8 +204,7 @@ def execute_run(run_id: str, db=None) -> None:
             r = httpx.post(endpoint, timeout=RUN_TIMEOUT_S,
                            headers={"Authorization": f"Bearer {secret}", "X-IntentLock-Run": run.id},
                            json={"intent_id": run.intent_id, "agent_id": agent.id, "agent_private_key": key,
-                                 **({"items": run.items} if run.items else
-                                    {"product_id": run.product_id, "qty": run.qty or 1} if run.product_id else {})})
+                                 **_run_items(db, run)})
         except httpx.HTTPError as e:
             run.response_ms = int((time.monotonic() - t0) * 1000)
             run.response_excerpt = f"{type(e).__name__}: {str(e)[:300]}"

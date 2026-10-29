@@ -20,7 +20,8 @@ def _pub() -> str:
 
 
 def _user(db, name):
-    u = User(id=new_id("usr"), name=name, email=f"{name.lower()}@example.com", currency="USD")
+    u = User(id=new_id("usr"), name=name, email=f"{name.lower()}@example.com", currency="USD",
+             shipping_address={"name": name, "line1": "1 Main St", "city": "Austin", "postal_code": "78701", "country": "US"})
     db.add(u)
     db.flush()
     tok = auth._login(db, u, "pytest", True)["token"]
@@ -62,7 +63,7 @@ def test_empty_summary_for_new_user(client, two):
 def test_agents_requests_orders_are_isolated(client, db, two):
     (alice, ha), (bob, hb) = two
     agent = _agent(client, ha)
-    assert client.get("/me/agents", headers=hb).json() == []
+    assert agent["id"] not in [a["id"] for a in client.get("/me/agents", headers=hb).json()]
 
     r = client.post("/me/requests", headers=ha, json={"agent_id": agent["id"], "request_text": "2 litres of milk"})
     assert r.status_code == 201, r.text
@@ -156,10 +157,10 @@ def hosted(monkeypatch, db):
     return calls, reply
 
 
-def _hosted_agent(client, h):
-    r = client.post("/me/agents/hosted", headers=h, json={"name": "Shopper"})
-    assert r.status_code == 201, r.text
-    return r.json()
+def _hosted_agent(client, h, kind="channel3"):
+    r = client.get("/me/agents", headers=h)
+    assert r.status_code == 200, r.text
+    return next(a for a in r.json() if a["managed"] and a["kind"] == kind)
 
 
 def test_hosted_agent_key_is_sealed_and_never_returned(client, db, two, hosted):
@@ -174,6 +175,20 @@ def test_hosted_agent_key_is_sealed_and_never_returned(client, db, two, hosted):
     with pytest.raises(Exception):
         hosted_agents.unseal(row.secret_enc, "agt_other")
     assert all("secret" not in k for x in client.get("/me/agents", headers=ha).json() for k in x)
+
+
+def test_default_agents_are_created_once_and_a_disconnect_is_respected(client, db, two, hosted):
+    (alice, ha), _ = two
+    first = client.get("/me/agents", headers=ha).json()
+    assert sorted((a["kind"], a["name"]) for a in first) == [("channel3", "Sepilo Shopper"), ("deals", "Sepilo Deal Finder")]
+    assert client.get("/me/agents", headers=ha).json() == first
+    deals_agent = _hosted_agent(client, ha, "deals")
+    assert client.post(f"/me/agents/{deals_agent['id']}/revoke", headers=ha).status_code == 200
+    again = client.get("/me/agents", headers=ha).json()
+    assert len(again) == 2 and next(a for a in again if a["kind"] == "deals")["revoked_at"]
+    hosted_agents.ensure_default_agents(db, alice.id)
+    assert db.query(Agent).filter(Agent.user_id == alice.id).count() == 2
+    assert client.post("/me/agents/hosted", headers=ha, json={"name": "x"}).status_code in (404, 405)
 
 
 def test_request_runs_hosted_agent_and_records_failure(client, two, hosted):
@@ -327,6 +342,8 @@ def _rule(client, h, agent_id, **over):
 
 def test_chat_needs_hosted_agent(client, two, chat_agent):
     (_, ha), _ = two
+    shopper = _hosted_agent(client, ha)
+    client.post(f"/me/agents/{shopper['id']}/revoke", headers=ha)
     assert client.post("/me/chats", headers=ha, json={}).json()["error"] == "no_hosted_agent"
     own = _agent(client, ha)
     assert client.post("/me/chats", headers=ha, json={"agent_id": own["id"]}).status_code == 409

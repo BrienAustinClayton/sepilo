@@ -125,3 +125,28 @@ test("approved cart: one store, exact items, current Channel3 prices", async () 
   await assert.rejects(buy([{ productId: "a", qty: 1 }, { productId: "c", qty: 1 }]), /different stores/);
   await assert.rejects(buy([{ productId: "gone", qty: 1 }]), /no longer available/);
 });
+
+test("web deals are bought from the API's snapshot, not looked up on Channel3", async () => {
+  let checkout: any;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = String(input);
+    if (url.includes("trychannel3")) throw new Error("web deals never touch Channel3");
+    if (url === "https://api.test/checkout") {
+      checkout = JSON.parse(init.body);
+      return new Response(JSON.stringify({ order_id: "ord_3", status: "captured", decision: "capture", reasons: [] }), { status: 200 });
+    }
+    return new Response("<html></html>", { status: 200 });
+  }) as typeof fetch;
+  const { shopExact } = await import("./shop.ts");
+  const snapshot = {
+    title: "USB-C Cable 1m", price: "12.99", merchant: "shop.test", url: "https://www.shop.test/p/cable", category: "electronics",
+  };
+  const buy = (picks: { productId: string; qty: number; snapshot?: typeof snapshot }[]) =>
+    withEnv(ENV, () => runWith(newRunContext("int_1"), () => shopExact("int_1", picks)));
+  const out = await buy([{ productId: "web_abc", qty: 2, snapshot }]);
+  assert.equal(out.checkout?.order_id, "ord_3");
+  assert.equal(checkout.merchant, "shop.test");
+  assert.deepEqual(checkout.cart.map((l: any) => [l.product_id, l.qty, l.unit_price, l.category]), [["web_abc", 2, "12.99", "electronics"]]);
+  assert.match(out.summary, /Bought 2 × USB-C Cable 1m from shop\.test for \$25\.98/);
+  await assert.rejects(buy([{ productId: "web_abc", qty: 1 }]), /no longer available/);
+});

@@ -38,7 +38,7 @@ BUCKETS: dict[str, tuple[str, ...]] = {
 
 
 def _agent_view(a: Agent) -> dict[str, Any]:
-    return {**_agent_out(a), "managed": bool(a.managed)}
+    return {**_agent_out(a), "managed": bool(a.managed), "kind": a.kind}
 
 
 def _not_found(what: str) -> HTTPException:
@@ -153,6 +153,7 @@ class AgentConnect(BaseModel):
 
 @router.get("/agents")
 def agents(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+    hosted_agents.ensure_default_agents(db, user.id)
     rows = db.execute(
         select(Agent).where(Agent.user_id == user.id).order_by(Agent.created_at.desc())
     ).scalars().all()
@@ -173,25 +174,6 @@ def connect_agent(body: AgentConnect, user: User = Depends(current_user), db: Se
     db.refresh(agent)
     send_security_notice(user.email, "A new agent was connected to your Sepilo account",
                          f"The agent “{agent.name}” can now shop for you within your spending rules.")
-    return _agent_view(agent)
-
-
-class HostedAgentCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    name: str = Field(min_length=1, max_length=100)
-
-
-@router.post("/agents/hosted", status_code=201)
-def create_hosted_agent(body: HostedAgentCreate, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    try:
-        agent = hosted_agents.new_hosted_agent(user.id, body.name)
-    except hosted_agents.HostedAgentError as e:
-        raise HTTPException(e.status, detail={"error": e.code, "reason": e.message})
-    db.add(agent)
-    db.commit()
-    db.refresh(agent)
-    send_security_notice(user.email, "A new agent was created on your Sepilo account",
-                         f"The hosted agent “{agent.name}” can now shop for you within your spending rules.")
     return _agent_view(agent)
 
 
