@@ -1,6 +1,5 @@
 export enum AgentModalTypeEnum {
   None = "none",
-  Hosted = "hosted",
   Own = "own",
 }
 
