@@ -1,3 +1,4 @@
+import { AgentKind } from "@/lib/types";
 import { AgentRunStatusEnum, ChatRoleEnum, CartCheckStatusEnum, CartReviewDecisionEnum } from "./enums";
 
 export interface ChatProductItem {
@@ -37,6 +38,7 @@ export interface ChatMessageItem {
 export interface ChatRuleOption {
   id: string;
   agent_id?: string;
+  agent_kind?: AgentKind;
   categories: string[];
   merchants: string[];
   budget: string;

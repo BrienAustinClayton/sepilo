@@ -1,3 +1,4 @@
+import { AgentKind } from "@/lib/types";
 import { AgentStatusEnum } from "./enums";
 
 export interface ShoppingAgent {
@@ -7,6 +8,7 @@ export interface ShoppingAgent {
   created_at: string;
   public_key: string;
   managed: boolean;
+  kind: AgentKind;
   device_id: string | null;
 }
 

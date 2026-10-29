@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { Minus, Plus, ShoppingCart, Trash2, X } from "lucide-react";
 import { CartDrawerProps } from "../../componentTypes";
 import { CartItemLine } from "../../types";
@@ -17,6 +18,7 @@ export function ChatCartDrawer({
   onUpdateQty,
   onCheckout,
   review,
+  addressRequired,
 }: CartDrawerProps) {
   const cartItems = cart && Array.isArray(cart.items) ? cart.items : [];
   const storeNames = Array.from(new Set(cartItems.map((item: CartItemLine) => item.merchant)));
@@ -150,6 +152,14 @@ export function ChatCartDrawer({
           </div>
 
           {review && <CartCheckList review={review} />}
+          {addressRequired && (
+            <div role="alert" className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3.5 space-y-3">
+              <p className="text-sm text-fg">{addressRequired}</p>
+              <Link href="/address" className="intentlock-btn-primary btn-sm">
+                Add shipping address
+              </Link>
+            </div>
+          )}
           <p className="text-xs text-fg-dim">
             Sepilo checks your rules, the prices with Channel3 and the listings (with Jev&apos;s second opinion)
             before anything is paid.
