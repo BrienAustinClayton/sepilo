@@ -53,6 +53,11 @@ PRICE_WEIGHT, EVIDENCE_WEIGHT, TRUST_WEIGHT = 0.5, 0.2, 0.3
 CENT = Decimal("0.01")
 MAX_PRICE = Decimal("50000")
 BLOCKED_DOMAINS = ("paypal.com", "paypal.me", "paypalobjects.com")
+PAYPAL_HOSTS = ("paypal.com", "paypalobjects.com")
+KNOWN_PAYPAL_MERCHANTS = ("ebay.com", "walmart.com", "bestbuy.com", "target.com", "newegg.com", "etsy.com",
+                          "homedepot.com", "lowes.com", "bhphotovideo.com", "adorama.com", "wayfair.com", "macys.com",
+                          "nordstrom.com", "kohls.com", "dickssportinggoods.com", "rei.com", "gamestop.com")
+MAX_LINKS = 500
 TRACKING_PARAMS = ("utm_", "gclid", "fbclid", "msclkid", "mc_", "ref", "affid")
 NO_PAYPAL = "doesn't show that the store accepts PayPal"
 
@@ -178,8 +183,9 @@ def _page(item: Any) -> dict[str, Any] | None:
     if not isinstance(url, str) or not isinstance(text, str):
         return None
     final = meta.get("url") if isinstance(meta.get("url"), str) else url
+    links = [l[:300] for l in item.get("links") or [] if isinstance(l, str)][:MAX_LINKS]
     return {"url": url[:2048], "final_url": final[:2048], "title": str(item.get("title") or meta.get("title") or "")[:300],
-            "text": text[:STORED_PAGE_CHARS * 2], "meta": _meta(meta)}
+            "text": text[:STORED_PAGE_CHARS * 2], "meta": _meta(meta), "links": links}
 
 
 def _cache_get(db: Session, key: str) -> list[dict] | None:
@@ -219,7 +225,8 @@ def search_pages(db: Session, query: str) -> list[dict[str, Any]]:
         return hit
     data = _firecrawl("/search", {"query": query[:500], "limit": SEARCH_LIMIT, "country": "US",
                                   "timeout": FIRECRAWL_TIMEOUT_MS,
-                                  "scrapeOptions": {"formats": [{"type": "markdown"}]}})
+                                  "scrapeOptions": {"formats": [{"type": "markdown"}, {"type": "links"}],
+                                                    "onlyMainContent": False}})
     web = data.get("data", {}).get("web") if isinstance(data.get("data"), dict) else None
     pages = [p for p in (_page(i) for i in (web if isinstance(web, list) else [])) if p]
     _cache_put(db, key, pages)
@@ -228,13 +235,13 @@ def search_pages(db: Session, query: str) -> list[dict[str, Any]]:
 
 def scrape_page(url: str) -> dict[str, Any]:
     """One page read fresh through Firecrawl /v2/scrape (never from cache)."""
-    data = _firecrawl("/scrape", {"url": url, "formats": ["markdown"], "onlyMainContent": True, "maxAge": 0,
+    data = _firecrawl("/scrape", {"url": url, "formats": ["markdown", "links"], "onlyMainContent": False, "maxAge": 0,
                                   "timeout": FIRECRAWL_TIMEOUT_MS})
     body = data.get("data") if isinstance(data.get("data"), dict) else {}
     meta = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     status = meta.get("statusCode")
     page = _page({"url": url, "markdown": body.get("markdown"), "metadata": {**meta, "url": meta.get("url") or url},
-                  "title": meta.get("title")})
+                  "title": meta.get("title"), "links": body.get("links")})
     if page is None or (isinstance(status, int) and status >= 400):
         raise HostedAgentError(502, "deals_unreachable", "The page couldn't be read.")
     return page
@@ -301,9 +308,23 @@ def _title_candidates(page: dict[str, Any]) -> list[str]:
     return out
 
 
-def _evidence(text: str) -> tuple[str, float] | None:
+def _paypal_link(links: list[str]) -> str | None:
+    for link in links:
+        host = (urlsplit(link).hostname or "").lower()
+        if link.startswith("https://") and any(host == h or host.endswith("." + h) for h in PAYPAL_HOSTS):
+            return link
+    return None
+
+
+def _evidence(text: str, links: list[str], merchant: str) -> tuple[str, float] | None:
     found = list(PAYPAL_RE.finditer(text))
+    link = _paypal_link(links)
+    known = any(merchant == d or merchant.endswith("." + d) for d in KNOWN_PAYPAL_MERCHANTS)
     if not found:
+        if link:
+            return f"Links to PayPal: {link[:120]}", 0.6
+        if known:
+            return f"{merchant} is a store known to accept PayPal", 0.5
         return None
     m = found[0]
     snippet = text[max(0, m.start() - EVIDENCE_RADIUS):m.end() + EVIDENCE_RADIUS].strip()
@@ -328,7 +349,7 @@ def analyse(page: dict[str, Any]) -> dict[str, Any]:
     currency = next((meta[k] for k in META_CURRENCY_KEYS if k in meta), "USD").upper()
     if currency != "USD":
         raise _Reject("isn't priced in USD")
-    evidence = _evidence(text)
+    evidence = _evidence(clean(page["text"], STORED_PAGE_CHARS * 2), page.get("links") or [], merchant)
     if evidence is None:
         raise _Reject(NO_PAYPAL)
     window = text[:LLM_PAGE_CHARS]

@@ -195,7 +195,7 @@ def test_search_is_cached_for_six_hours(db, monkeypatch):
     first = deals.search_pages(db, "usb c cable buy online PayPal")
     assert deals.search_pages(db, "usb c cable buy online PayPal") == first
     assert len(calls) == 1 and calls[0][0] == "/search" and calls[0][1]["limit"] == 8
-    assert calls[0][1]["scrapeOptions"] == {"formats": [{"type": "markdown"}]}
+    assert calls[0][1]["scrapeOptions"] == {"formats": [{"type": "markdown"}, {"type": "links"}], "onlyMainContent": False}
     assert first[0]["meta"] == {"og:image": "https://x.test/i.png"}
     key = next(r.key for r in db.query(CatalogCache).all() if r.key.startswith("fc:search:"))
     row = db.get(CatalogCache, key)
@@ -285,7 +285,7 @@ def test_scrape_is_always_fresh(monkeypatch):
     monkeypatch.setattr(deals, "_firecrawl", lambda path, body: seen.append((path, body)) or
                         {"success": True, "data": {"markdown": "$9.99 PayPal", "metadata": {"statusCode": 200}}})
     deals.scrape_page("https://www.shop.test/p")
-    assert seen[0][0] == "/scrape" and seen[0][1]["maxAge"] == 0 and seen[0][1]["formats"] == ["markdown"]
+    assert seen[0][0] == "/scrape" and seen[0][1]["maxAge"] == 0 and seen[0][1]["formats"] == ["markdown", "links"]
 
 
 # --------------------------------------------------------------------------- #
@@ -335,3 +335,12 @@ def test_deal_chat_suggests_from_the_web_and_checkout_needs_an_address(client, d
     r = client.post(f"/me/chats/{chat['id']}/checkout", headers=h, json={})
     assert r.status_code == 409 and r.json()["error"] == "address_required"
     assert "shipping address" in r.json()["reason"]
+
+
+
+def test_paypal_link_or_known_store_counts_as_evidence():
+    assert deals._evidence("Free shipping", ["https://www.paypal.com/us/webapps/mpp/paypal-popup"], "shop.example")[1] == 0.6
+    assert deals._evidence("Free shipping", [], "ebay.com")[1] == 0.5
+    assert deals._evidence("Free shipping", ["http://www.paypal.com/x"], "shop.example") is None
+    assert deals._evidence("Free shipping", ["https://notpaypal.com/x"], "shop.example") is None
+    assert deals._evidence("Free shipping", [], "amazon.com") is None
