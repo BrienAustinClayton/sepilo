@@ -20,4 +20,4 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   return res;
 }
 
-export { forward as GET, forward as POST, forward as PATCH, forward as DELETE };
+export { forward as GET, forward as POST, forward as PUT, forward as PATCH, forward as DELETE };
