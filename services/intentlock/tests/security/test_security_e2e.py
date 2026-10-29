@@ -46,6 +46,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = SERVICE_ROOT.parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
+from conftest import buyer_fields  # noqa: E402
 from app.checks import injection, injection_rules  # noqa: E402
 from app.checks import intent_diff as intent_diff_mod  # noqa: E402
 from app.config import settings  # noqa: E402
@@ -167,7 +168,7 @@ def client(db):
 
 def _make_seed(db, name="Priya", request_text="Whole milk from freshmart"):
     priv, pub = generate_keypair_b64()
-    u = User(id=new_id("usr"), name=name)
+    u = User(id=new_id("usr"), name=name, **buyer_fields())
     db.add(u)
     db.flush()
     a = Agent(id=new_id("agt"), user_id=u.id, name="shopper", public_key=pub, device_id="dev1", verified=True)
@@ -736,7 +737,7 @@ def lab_env(db, client, monkeypatch, tmp_path, jev):
     priv, pub = generate_keypair_b64()
     monkeypatch.setenv("AGENT_PRIVATE_KEY", priv)
     if db.get(User, PRIYA) is None:
-        db.add(User(id=PRIYA, name="Priya", paypal_payment_token="tok_test"))
+        db.add(User(id=PRIYA, name="Priya", paypal_payment_token="tok_test", **buyer_fields()))
         db.flush()
 
     def upsert(agent_id, public_key, *, revoked=False):

@@ -182,6 +182,7 @@ def _no_real_email(monkeypatch):
     set RESEND_API_KEY themselves."""
     from app.config import settings
     monkeypatch.setattr(settings, "RESEND_API_KEY", None)
+    monkeypatch.setattr(settings, "WEB_ORIGIN", "http://localhost:3000")
 
 
 @pytest.fixture(autouse=True)
@@ -199,3 +200,104 @@ def _channel3_guards(monkeypatch):
 
     monkeypatch.setattr(channel3, "spend_credit", spend)
     monkeypatch.setattr(channel3, "_sleep", lambda s: None)
+
+
+def buyer_fields() -> dict:
+    """User columns a buyer needs before any order of theirs can be paid: a verified email and a shipping address."""
+    import uuid
+
+    from app.signing import utcnow
+
+    return {
+        "email": f"buyer-{uuid.uuid4().hex[:12]}@example.com",
+        "email_verified_at": utcnow(),
+        "shipping_address": {"name": "Priya Test", "line1": "1 Main St", "city": "Springfield",
+                             "region": "IL", "postal_code": "62701", "country": "US"},
+    }
+
+
+def prepare_capturable(db, order, *, category: str = "groceries"):
+    """Give an existing order everything the 32 payment checks look for, so that it can be paid."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.mandates import create_mandate, select_mandate_for_agent
+    from app.models import Check, User
+    from app.pipeline.steps import record_check
+    from app.signing import utcnow
+
+    user = db.get(User, order.user_id)
+    for key, value in buyer_fields().items():
+        if getattr(user, key) is None:
+            setattr(user, key, value)
+    if select_mandate_for_agent(db, order.agent_id, order.merchant) is None:
+        create_mandate(db, {
+            "agent_id": order.agent_id, "categories": [category], "merchants": [order.merchant],
+            "budget_amount": "4000.00", "budget_period": "week", "currency": order.currency,
+            "starts_at": utcnow() - timedelta(days=1), "expires_at": utcnow() + timedelta(days=30),
+        })
+    if not order.cart_json:
+        order.cart_json = [{"product_id": "p_item", "title": "Item", "qty": 1,
+                            "unit_price": str(Decimal(str(order.total)).quantize(Decimal("0.01"))),
+                            "currency": order.currency, "category": category}]
+    order.page_urls = order.page_urls or []
+    suffix = order.id[-8:]
+    order.paypal_order_id = order.paypal_order_id or "MOCK-O-" + suffix
+    order.authorization_id = order.authorization_id or "MOCK-A-" + suffix
+    have = {c.step for c in db.query(Check).filter(Check.order_id == order.id)}
+    rows = (
+        ("verify_agent", {"result": "pass", "reason": "ok"}, None),
+        ("check_mandate", {"result": "pass", "reason": "ok"}, None),
+        ("scan_injection", {"detected": False, "confidence": 0.99}, 0.99),
+        ("intent_diff", {"items": [{"explained": "yes"}], "price_anomaly": False}, None),
+        ("graph_risk", {"score": 5}, 5),
+    )
+    for step, details, score in rows:
+        if step not in have:
+            record_check(db, order.id, step, "pass", details, 1, score)
+    db.flush()
+    return order
+
+
+def make_capturable_order(db, *, status: str = "pending_approval", total: str = "3.50", merchant: str = "freshmart",
+                          expires_in_min: int = 30, approval: bool = True):
+    """A whole buyer, agent, rule, signed request and order that passes every payment check."""
+    from datetime import timedelta
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.crypto.keys import generate_keypair_b64
+    from app.ids import new_id
+    from app.intents import create_intent
+    from app.models import Agent, Approval, Order, User
+    from app.paypal import service as paypal_service
+    from app.signing import utcnow
+
+    _priv, pub = generate_keypair_b64()
+    user = User(id=new_id("usr"), name="Tester", **buyer_fields())
+    db.add(user)
+    db.flush()
+    agent = Agent(id=new_id("agt"), user_id=user.id, name="shopper", public_key=pub, device_id="dev1", verified=True)
+    db.add(agent)
+    db.flush()
+    intent = create_intent(db, user_id=user.id, agent_id=agent.id, request_text="buy groceries")
+    oid = new_id("ord")
+    held = status == "pending_approval"
+    order = Order(
+        id=oid, intent_id=intent.id, agent_id=agent.id, user_id=user.id, merchant=merchant,
+        cart_json=[], total=Decimal(total), currency="USD", status=status,
+        decision="hold" if held else None, reasons=["needs review"] if held else None,
+    )
+    db.add(order)
+    db.flush()
+    prepare_capturable(db, order)
+    appr = None
+    if approval and held:
+        now = utcnow()
+        appr = Approval(id=new_id("apr"), order_id=oid, requested_at=now,
+                        expires_at=now + timedelta(minutes=expires_in_min))
+        db.add(appr)
+        db.flush()
+    with paypal_service._LOCK:
+        paypal_service._AUTH[order.authorization_id] = "authorized"
+    return SimpleNamespace(user=user, agent=agent, intent=intent, order=order, approval=appr)

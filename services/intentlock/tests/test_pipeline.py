@@ -26,6 +26,7 @@ SERVICE_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = SERVICE_ROOT.parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
+from conftest import buyer_fields  # noqa: E402
 from app.checks import injection_rules  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.crypto.http_sig import sign_request  # noqa: E402
@@ -151,7 +152,7 @@ def client(db):
 
 def _make_seed(db, name="Priya"):
     priv, pub = generate_keypair_b64()
-    u = User(id=new_id("usr"), name=name)
+    u = User(id=new_id("usr"), name=name, **buyer_fields())
     db.add(u)
     db.flush()
     a = Agent(id=new_id("agt"), user_id=u.id, name="shopper", public_key=pub, device_id="dev1", verified=True)
@@ -261,7 +262,8 @@ def test_checks_rows_one_per_step_with_duration(client, db, seed, monkeypatch):
     yes_hook(monkeypatch)
     j = ok(client, seed)
     c = checks(db, j["order_id"])
-    assert set(c) == set(ALL_STEPS)
+    assert set(c) == set(ALL_STEPS) | {"preflight"}
+    assert c["preflight"].result == "pass" and c["preflight"].details_json["total"] == 32
     assert all(isinstance(r.duration_ms, int) and r.duration_ms >= 0 for r in c.values())
     assert c["verify_agent"].result == "pass"
     assert c["decide"].result == "pass"
@@ -691,6 +693,8 @@ def buyer_flow(db, monkeypatch):
 
     monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "http://testserver")  # also the signed checkout URL
     monkeypatch.setattr(settings, "WEB_ORIGIN", "https://shop.example.test")
+    monkeypatch.setattr(settings, "RESEND_API_KEY", "re_test_key")
+    monkeypatch.setattr("app.notify.httpx.post", lambda *a, **k: SimpleNamespace(status_code=200, text=""))
 
     async def resume(order_id):
         await core.resume_after_payment(db, order_id, LocalExecutor(db))
