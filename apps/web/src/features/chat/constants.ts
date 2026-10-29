@@ -1,5 +1,23 @@
 import { SHOPPING_CATEGORIES } from "@/features/rules/constants";
+import { AgentKind } from "@/lib/types";
 import { ChatRuleOption } from "./types";
+
+export const AGENT_CHOICES: { kind: AgentKind; label: string; name: string; hint: string; intro: string }[] = [
+  {
+    kind: "channel3",
+    label: "Shopper",
+    name: "Sepilo Shopper",
+    hint: "Searches the Sepilo catalog",
+    intro: "I search real stores through Channel3 and only suggest what your spending rules allow. Add what you like to your cart; nothing is bought until you approve it.",
+  },
+  {
+    kind: "deals",
+    label: "Deal Finder",
+    name: "Sepilo Deal Finder",
+    hint: "Searches the web for stores that take PayPal",
+    intro: "I search the web for stores that accept PayPal and show you the best deals I can verify.",
+  },
+];
 
 export const STARTER_PROMPTS: Record<string, string[]> = {
   electronics: ["A USB-C to USB-C cable, about 1 m, under $20", "Wireless earbuds under $50"],

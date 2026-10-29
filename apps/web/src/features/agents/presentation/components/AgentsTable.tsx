@@ -4,6 +4,7 @@ import React from "react";
 import { Bot } from "lucide-react";
 import { AgentsTableProps } from "../../componentTypes";
 import { AgentStatusEnum } from "../../enums";
+import { AGENT_KIND_BADGE } from "../../constants";
 import { ShoppingAgent } from "../../types";
 import { CopyAgentIdButton } from "./CopyAgentIdButton";
 
@@ -53,9 +54,14 @@ export function AgentsTable({ agents, onDisconnectAgent }: AgentsTableProps) {
                   <CopyAgentIdButton value={agent.id} />
                 </td>
                 <td className="px-4 py-3 text-sm text-fg-2 align-middle">
-                  <span className="text-xs text-fg-muted">
-                    {agent.managed ? "Hosted by Sepilo" : "External Agent"}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${AGENT_KIND_BADGE[agent.kind].style}`}>
+                      {AGENT_KIND_BADGE[agent.kind].label}
+                    </span>
+                    <span className="text-xs text-fg-muted">
+                      {agent.managed ? "Hosted by Sepilo" : "External Agent"}
+                    </span>
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-fg-2 align-middle">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusBadgeStyle}`}>

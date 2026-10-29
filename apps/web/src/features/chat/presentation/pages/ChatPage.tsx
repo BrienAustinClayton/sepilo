@@ -6,13 +6,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Bot, History, ShoppingCart, Store } from "lucide-react";
 import { NavDrawer } from "@/components/Sidebar";
 import { ApiCallError } from "@/shared/api/ApiCallError";
+import { AgentKind } from "@/lib/types";
 import { ToastTypeEnum } from "@/shared/enums";
 import { showToast } from "@/shared/toast/toastManager";
-import { PAYPAL_NOTICE, promptsFor } from "../../constants";
+import { AGENT_CHOICES, PAYPAL_NOTICE, promptsFor } from "../../constants";
 import { ChatRoleEnum } from "../../enums";
 import { useChatSessions } from "../../hooks/useChatSessions";
 import { CartReview, ChatCartState, ChatMessageItem, ChatProductItem, ChatRuleOption } from "../../types";
 import { ChatCartDrawer } from "../components/ChatCartDrawer";
+import { AgentKindPicker } from "../components/AgentKindPicker";
 import { ChatComposer } from "../components/ChatComposer";
 import { ChatHistoryPanel } from "../components/ChatHistoryPanel";
 import { ChatMessageItemView } from "../components/ChatMessageItemView";
@@ -35,6 +37,8 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [pendingRule, setPendingRule] = useState<string | null>(null);
+  const [pendingKind, setPendingKind] = useState<AgentKind>("channel3");
+  const [addressRequired, setAddressRequired] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartReview, setCartReview] = useState<CartReview | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -81,14 +85,17 @@ export function ChatPage() {
   const thread = activeChat && activeChat.id === activeChatId ? activeChat : null;
   const cart = thread?.cart ?? DEFAULT_EMPTY_CART;
   const messages = useMemo(() => thread?.messages ?? [], [thread]);
-  const ruleOptions: ChatRuleOption[] = thread?.rule_options ?? myRules;
-  const ruleId = thread ? thread.rule_id : myRules.some((r) => r.id === pendingRule) ? pendingRule : null;
-  const rulesInUse = thread?.rules ?? (myRules.filter((r) => r.id === ruleId).length ? myRules.filter((r) => r.id === ruleId) : myRules);
+  const newChatRules = myRules.filter((r) => r.agent_kind === pendingKind);
+  const ruleOptions: ChatRuleOption[] = thread?.rule_options ?? newChatRules;
+  const ruleId = thread ? thread.rule_id : newChatRules.some((r) => r.id === pendingRule) ? pendingRule : null;
+  const rulesInUse = thread?.rules ?? (newChatRules.filter((r) => r.id === ruleId).length ? newChatRules.filter((r) => r.id === ruleId) : newChatRules);
   const isSending = isSendingMessage || pendingMessage !== null;
   const lastMessage = messages[messages.length - 1];
   const pendingAlreadySaved =
     pendingMessage !== null && lastMessage?.role === ChatRoleEnum.User && lastMessage.content === pendingMessage;
   const showSkeleton = Boolean(activeChatId) && isLoadingActiveChat && !thread && !pendingMessage;
+  const agentChoice = AGENT_CHOICES.find((choice) => choice.kind === pendingKind) ?? AGENT_CHOICES[0];
+  const introChoice = AGENT_CHOICES.find((choice) => choice.kind === (thread?.agent?.kind ?? pendingKind)) ?? AGENT_CHOICES[0];
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -103,8 +110,7 @@ export function ChatPage() {
     try {
       let chatId = activeChatId;
       if (!chatId) {
-        const picked = myRules.find((r) => r.id === ruleId);
-        const created = await createChat({ agentId: picked?.agent_id, ruleId });
+        const created = await createChat({ ruleId, agentKind: pendingKind });
         chatId = created.id;
         openChat(chatId);
       }
@@ -218,7 +224,7 @@ export function ChatPage() {
               />
               <div className="flex items-center gap-1 text-xs text-fg-dim truncate">
                 <Store className="w-3.5 h-3.5 shrink-0" strokeWidth={1.8} />
-                Channel3
+                {thread?.agent?.name ?? agentChoice.name}
               </div>
             </div>
           </div>
@@ -256,11 +262,9 @@ export function ChatPage() {
               <div className="pt-4 sm:pt-12 text-center space-y-6">
                 <div className="space-y-2">
                   <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">What should Sepilo buy for you?</h1>
-                  <p className="text-sm text-fg-muted max-w-lg mx-auto">
-                    I search real stores through Channel3 and only suggest what your spending rules allow. Add what you like to
-                    your cart; nothing is bought until you approve it.
-                  </p>
+                  <p className="text-sm text-fg-muted max-w-lg mx-auto">{introChoice.intro}</p>
                 </div>
+                {!thread && <AgentKindPicker value={pendingKind} onChange={setPendingKind} />}
                 <ChatStarterPrompts prompts={promptsFor(rulesInUse)} onPick={fillFromStarter} />
                 <div className="pt-4 sm:pt-8">
                   <RecentConversations chats={chats} onOpen={openChat} />
@@ -318,18 +322,24 @@ export function ChatPage() {
         }}
         onCheckout={(confirm: boolean) => {
           if (!activeChatId) return;
+          setAddressRequired(null);
           checkout({ chatId: activeChatId, confirm })
             .then(() => {
               setCartReview(null);
               setIsCartOpen(false);
             })
             .catch((err: unknown) => {
+              if (err instanceof ApiCallError && err.errorCode === "address_required") {
+                setAddressRequired(err.message);
+                return;
+              }
               const review = err instanceof ApiCallError ? (err.data.review as CartReview | undefined) : undefined;
               setCartReview(review ?? null);
               if (!review) showToast(err instanceof Error ? err.message : "Checkout failed", ToastTypeEnum.Error);
             });
         }}
         review={cartReview}
+        addressRequired={addressRequired}
       />
     </div>
   );

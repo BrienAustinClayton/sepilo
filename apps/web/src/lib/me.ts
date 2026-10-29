@@ -3,6 +3,7 @@
 import { ApiError } from "@/lib/api";
 import type {
   Agent,
+  AgentKind,
   BudgetPeriod,
   GetOrderResponse,
   Mandate,
@@ -35,7 +36,7 @@ export interface AgentRunView {
   finished_at: string | null;
 }
 
-export type MyAgent = Agent & { managed: boolean };
+export type MyAgent = Agent & { managed: boolean; kind: AgentKind };
 
 export interface ChatProduct {
   product_id: string;
@@ -91,7 +92,7 @@ export interface Cart {
 export interface ChatThread {
   id: string;
   title: string;
-  agent: { id: string; name: string; managed: boolean; active: boolean } | null;
+  agent: { id: string; name: string; kind: AgentKind; managed: boolean; active: boolean } | null;
   /** The rule this chat shops under; null means all of the agent's active rules. */
   rule_id: string | null;
   rule_options: ChatRule[];
@@ -165,8 +166,12 @@ export const me = {
   createRequest: (b: { agent_id: string; request_text: string }) => call<PurchaseRequest>("requests", "POST", b),
   runRequest: (requestId: string) => call<AgentRunView>(`requests/${id(requestId)}/run`, "POST"),
   chats: () => call<ChatSummary[]>("chats"),
-  createChat: (agentId?: string, ruleId?: string) =>
-    call<ChatSummary>("chats", "POST", { ...(agentId && { agent_id: agentId }), ...(ruleId && { mandate_id: ruleId }) }),
+  createChat: (agentId?: string, ruleId?: string, agentKind?: AgentKind) =>
+    call<ChatSummary>("chats", "POST", {
+      ...(agentId && { agent_id: agentId }),
+      ...(ruleId && { mandate_id: ruleId }),
+      ...(agentKind && { agent_kind: agentKind }),
+    }),
   chat: (chatId: string) => call<ChatThread>(`chats/${id(chatId)}`),
   setChatRule: (chatId: string, ruleId: string | null) => call<ChatThread>(`chats/${id(chatId)}`, "PATCH", { mandate_id: ruleId }),
   deleteChat: (chatId: string) => call<{ ok: boolean }>(`chats/${id(chatId)}`, "DELETE"),

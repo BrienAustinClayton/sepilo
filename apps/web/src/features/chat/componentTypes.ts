@@ -37,6 +37,7 @@ export interface CartDrawerProps {
   onUpdateQty: (productId: string, qty: number) => void;
   onCheckout: (confirm: boolean) => void;
   review: CartReview | null;
+  addressRequired: string | null;
 }
 
 export interface CartCheckListProps {
