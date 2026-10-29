@@ -4,6 +4,7 @@ import { HttpMethodEnum } from "@/shared/enums";
 import { OrderFilterTabEnum } from "../enums";
 import { ApiOrderDetail, toOrderDetail } from "../mappers";
 import { OrderDetailResponse, OrderSummary } from "../types";
+import { isInProgress } from "../utils";
 
 export function useOrdersManagement(selectedTab: OrderFilterTabEnum = OrderFilterTabEnum.All, activeOrderId: string | null = null) {
   const queryClient = useQueryClient();
@@ -26,6 +27,10 @@ export function useOrdersManagement(selectedTab: OrderFilterTabEnum = OrderFilte
         method: HttpMethodEnum.Get,
       }).then(toOrderDetail),
     enabled: shouldFetchDetail,
+    refetchInterval: (query) => {
+      const status = query.state.data?.order.status;
+      return status !== undefined && isInProgress(status) ? 4000 : false;
+    },
   });
 
   const approveOrderMutation = useMutation<OrderSummary, Error, { orderId: string; confirmTotal?: string }>({

@@ -1,4 +1,6 @@
-import { CartItemDetails, OrderSummary, PreflightSummary, SecurityCheckRecord } from "./types";
+import React from "react";
+import { OrderStatusEnum } from "./enums";
+import { CartItemDetails, OrderSummary, PreflightSummary, SecurityCheckRecord, ShippingAddress } from "./types";
 
 export interface OrdersListProps {
   orders: OrderSummary[];
@@ -26,6 +28,17 @@ export interface OrderApprovalActionsProps {
   isProcessing: boolean;
 }
 
-export interface PreflightChecklistProps {
-  summary: PreflightSummary;
+export interface SecurityChecksPanelProps {
+  summary: PreflightSummary | null;
+  status: OrderStatusEnum;
+}
+
+export interface OrderStatusHeroProps {
+  order: OrderSummary;
+  preflight: PreflightSummary | null;
+  children?: React.ReactNode;
+}
+
+export interface ShippingAddressCardProps {
+  address: ShippingAddress;
 }

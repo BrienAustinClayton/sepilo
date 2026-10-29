@@ -58,9 +58,26 @@ def _user_safe_details(c: Check) -> Optional[dict[str, Any]]:
         return {"items": items, "price_anomaly": bool(d.get("price_anomaly"))}
     if c.step == "decide":
         return {"decision": d.get("decision"), "reasons": list(d.get("reasons") or [])}
+    if c.step == "preflight":
+        items = [{k: i.get(k) for k in ("id", "label", "status", "detail")}
+                 for i in d.get("checks") or [] if isinstance(i, dict)]
+        return {"checks": items, "passed": d.get("passed"), "total": d.get("total")} if items else None
     if c.step in ("capture_or_void", "authorize_payment"):
         return {"action": d.get("action")} if d.get("action") else None
     return None
+
+
+def preflight_summary(check: Optional[Check]) -> Optional[dict[str, Any]]:
+    """Headline of the 32 payment checks for list views: how many passed and the first failures."""
+    if check is None or not isinstance(check.details_json, dict):
+        return None
+    d = check.details_json
+    items = [c for c in d.get("checks") or [] if isinstance(c, dict)]
+    ok = sum(1 for c in items if c.get("status") in ("pass", "accepted"))
+    passed = d["passed"] if isinstance(d.get("passed"), int) else ok
+    total = d["total"] if isinstance(d.get("total"), int) else 32
+    failed = [str(c.get("label")) for c in items if c.get("status") == "fail" and c.get("detail") != "not_sent"]
+    return {"passed": passed, "total": total, "failed": failed[:2]}
 
 
 def user_order_dict(order: Order) -> dict[str, Any]:

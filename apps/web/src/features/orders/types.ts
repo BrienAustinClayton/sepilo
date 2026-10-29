@@ -35,6 +35,31 @@ export interface PreflightSummary {
   total: number;
 }
 
+export interface ChecksSummary {
+  passed: number;
+  total: number;
+  failed: string[];
+}
+
+export interface OrderCounts {
+  all: number;
+  needs_approval: number;
+  paid: number;
+  blocked: number;
+  in_progress: number;
+}
+
+export interface ShippingAddress {
+  name?: string;
+  line1?: string;
+  line2?: string;
+  city?: string;
+  region?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+}
+
 export interface OrderApprovalRecord {
   id: string;
   decision: ApprovalDecisionEnum;
@@ -53,6 +78,8 @@ export interface OrderSummary {
   approval_timeout_at: string | null;
   decision_reasons: string[] | null;
   pay_url?: string | null;
+  shipping_address?: ShippingAddress | null;
+  checks?: ChecksSummary | null;
 }
 
 export interface OrderDetailResponse {

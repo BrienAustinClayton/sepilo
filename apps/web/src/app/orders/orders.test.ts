@@ -47,3 +47,37 @@ test("orders: lineTotal missing decimal", () => {
   // "10" treated as "10.00"
   assert.equal(lineTotal("10", 2), "20.00");
 });
+
+const constantsUrl = new URL("../../features/orders/constants.ts", import.meta.url).href;
+const constants: Record<string, unknown> = await import(constantsUrl);
+
+function records(value: unknown): Record<string, unknown>[] {
+  assert.ok(Array.isArray(value));
+  return value.filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null);
+}
+
+test("checks guide: all 32 checks are explained in full", () => {
+  const info = constants.CHECK_INFO;
+  assert.ok(typeof info === "object" && info !== null);
+  const ids = Array.from({ length: 32 }, (_, i) => `P${String(i + 1).padStart(2, "0")}`);
+  assert.deepEqual(Object.keys(info).sort(), ids);
+  for (const entry of Object.values(info)) {
+    assert.ok(typeof entry === "object" && entry !== null);
+    for (const field of ["label", "what", "why", "onFail"]) {
+      const text: unknown = Reflect.get(entry, field);
+      assert.ok(typeof text === "string" && text.length > 0, field);
+    }
+  }
+});
+
+test("checks guide: 10 groups cover every check exactly once", () => {
+  const groups = records(constants.CHECK_GROUPS);
+  assert.equal(groups.length, 10);
+  const covered: number[] = [];
+  for (const g of groups) {
+    const { from, to } = g;
+    assert.ok(typeof from === "number" && typeof to === "number");
+    for (let n = from; n <= to; n++) covered.push(n);
+  }
+  assert.deepEqual(covered, Array.from({ length: 32 }, (_, i) => i + 1));
+});

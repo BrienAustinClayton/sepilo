@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.agents import _agent_out
 from app.api.approvals import ApprovalRequest, post_approval
 from app.api.mandates import MandateCreate, MandatePatch, _http
-from app.api.orders import _order_to_dict, user_order_dict
+from app.api.orders import _order_to_dict, preflight_summary, user_order_dict
 from app.api.vault import vault_setup
 from app.auth import current_session, current_user, send_security_notice
 from app.crypto.keys import load_public_key
@@ -23,7 +23,7 @@ from app import hosted_agents, velocity
 from app.ids import new_id
 from app.intents import create_intent, intent_to_dict
 from app.mandates import create_mandate, list_mandates_for_user, mandate_to_dict, revoke_mandate, update_mandate
-from app.models import Agent, AgentRun, Intent, Mandate, Order, User, UserSession
+from app.models import Agent, AgentRun, Check, Intent, Mandate, Order, User, UserSession
 from app.paypal import service as paypal
 from app.service_errors import ServiceError
 
@@ -125,7 +125,24 @@ def orders(
         stmt = stmt.where(Order.status.in_(BUCKETS[view]))
     # Waiting approvals: biggest first, so the order that matters most isn't buried (approval fatigue)
     stmt = stmt.order_by(Order.total.desc() if view == "needs_approval" else Order.created_at.desc()).limit(500)
-    return [_order_to_dict(o) for o in db.execute(stmt).scalars().all()]
+    rows = list(db.execute(stmt).scalars().all())
+    latest: dict[str, Check] = {}
+    if rows:
+        for c in db.execute(
+            select(Check).where(Check.step == "preflight", Check.order_id.in_([o.id for o in rows]))
+            .order_by(Check.created_at, Check.id)
+        ).scalars():
+            latest[c.order_id] = c
+    return [{**_order_to_dict(o), "checks": preflight_summary(latest.get(o.id))} for o in rows]
+
+
+@router.get("/orders/counts")
+def order_counts(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, int]:
+    by_status = dict(db.execute(
+        select(Order.status, func.count()).where(Order.user_id == user.id).group_by(Order.status)
+    ).all())
+    counts = {name: sum(by_status.get(s, 0) for s in statuses) for name, statuses in BUCKETS.items()}
+    return {"all": sum(by_status.values()), **counts}
 
 
 @router.get("/orders/{order_id}")
