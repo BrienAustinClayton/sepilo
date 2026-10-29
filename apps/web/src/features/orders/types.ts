@@ -8,9 +8,9 @@ import {
 export interface CartItemDetails {
   product_id: string;
   title: string;
-  price: string;
+  unit_price?: string;
   qty: number;
-  category: string;
+  category?: string;
 }
 
 export interface SecurityCheckRecord {
