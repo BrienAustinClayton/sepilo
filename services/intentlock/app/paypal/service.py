@@ -25,6 +25,7 @@ _LOCK = threading.Lock()
 _CALLS: list[dict] = []
 _AUTH: dict[str, str] = {}
 _CAPTURE_IDS: dict[str, str] = {}
+_REFUNDS: dict[str, str] = {}
 _FAIL: dict[str, list[PayPalError]] = {}
 _SETUP: dict[str, str] = {}
 
@@ -98,6 +99,20 @@ def _mock_void(aid: str, request_id: str | None) -> None:
         _AUTH[aid] = "voided"
 
 
+def _mock_refund(capture_id: str, amount: Decimal, currency: str, request_id: str) -> str:
+    _record({"op": "refund", "capture_id": capture_id, "amount": f"{Decimal(str(amount)):.2f}",
+             "currency": currency, "request_id": request_id})
+    err = _take_failure("refund")
+    if err is not None:
+        raise err
+    if Decimal(str(amount)) <= 0:
+        raise PayPalError("INVALID_AMOUNT")
+    if not str(capture_id).startswith("MOCK-C-"):
+        raise PayPalError("CAPTURE_NOT_FOUND")
+    with _LOCK:
+        return _REFUNDS.setdefault(request_id, "MOCK-R-" + _h(request_id))
+
+
 def _impl():
     mode = paypal_mode()
     if mode == "mock":
@@ -121,6 +136,13 @@ def capture(authorization_id: str, request_id: str | None = None) -> str:
     if impl is None:
         return _mock_capture(authorization_id, request_id)
     return impl.capture(authorization_id, request_id=request_id)
+
+
+def refund(capture_id: str, amount: Decimal, currency: str, request_id: str) -> str:
+    impl = _impl()
+    if impl is None:
+        return _mock_refund(capture_id, amount, currency, request_id)
+    return impl.refund(capture_id, amount, currency, request_id)
 
 
 def void(authorization_id: str, request_id: str | None = None) -> None:
@@ -216,6 +238,7 @@ def reset_mock() -> None:
         _CALLS.clear()
         _AUTH.clear()
         _CAPTURE_IDS.clear()
+        _REFUNDS.clear()
         _FAIL.clear()
         _SETUP.clear()
 

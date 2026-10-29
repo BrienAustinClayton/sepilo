@@ -84,3 +84,49 @@ def send_payment_notice(user, order) -> bool:
     except Exception as e:  # noqa: BLE001
         log.warning("notify.payment_notice_failed order_id=%s error=%s", order.id, type(e).__name__)
         return False
+
+
+DISPUTE_OUTCOMES = {
+    "refunded": ("Your dispute was approved and refunded", "We approved your dispute and refunded the payment to PayPal."),
+    "rejected": ("Your dispute was reviewed", "We reviewed your dispute and did not approve a refund."),
+}
+
+
+def send_dispute_update(user, dispute) -> bool:
+    try:
+        key = _cfg("RESEND_API_KEY")
+        if not key:
+            if _is_local():
+                log.warning("notify.dev_dispute_update dispute_id=%s (RESEND_API_KEY unset; local dev only)", dispute.id)
+                return True
+            log.warning("notify.dispute_update_not_configured dispute_id=%s", dispute.id)
+            return False
+        outcome = DISPUTE_OUTCOMES.get(dispute.status)
+        if not user.email or outcome is None:
+            return False
+        subject, line = outcome
+        link = f"{web_origin()}/orders/{dispute.order_id}"
+        note = (dispute.decision_note or "").strip()
+        text = f"{line}\n\n" + (f"Note from our team: {note}\n\n" if note else "") + f"Open the order: {link}\n"
+        note_html = f'<p style="font-size:14px;margin:0 0 12px">Note from our team: {html.escape(note)}</p>' if note else ""
+        body_html = f"""<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#111318">
+<p style="font-size:15px;font-weight:600;margin:0 0 24px">Sepilo</p>
+<p style="font-size:14px;margin:0 0 12px">{html.escape(line)}</p>
+{note_html}
+<p style="font-size:14px;margin:0"><a href="{html.escape(link)}">Open the order</a></p>
+</div>"""
+        body = {
+            "from": _cfg("RESEND_FROM") or "Sepilo <support@sepilo.space>",
+            "to": [user.email],
+            "subject": subject,
+            "text": text,
+            "html": body_html,
+        }
+        r = httpx.post(RESEND_URL, json=body, headers={"Authorization": f"Bearer {key}"}, timeout=10)
+        if r.status_code >= 300:
+            log.warning("notify.dispute_update_failed dispute_id=%s status=%s", dispute.id, r.status_code)
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("notify.dispute_update_failed dispute_id=%s error=%s", dispute.id, type(e).__name__)
+        return False

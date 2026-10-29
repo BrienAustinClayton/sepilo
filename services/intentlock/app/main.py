@@ -26,6 +26,7 @@ from app.api import (
     chats,
     checkout,
     console,
+    disputes,
     graph,
     intents,
     lab,
@@ -141,6 +142,8 @@ async def ping() -> dict[str, bool]:
 # ------------------------------------------------------------------ #
 app.include_router(auth.router)
 app.include_router(me.router)
+app.include_router(disputes.me_router)
+app.include_router(disputes.router)
 app.include_router(chats.router)
 app.include_router(users.router, dependencies=[Depends(require_admin)])
 app.include_router(vault.router)
