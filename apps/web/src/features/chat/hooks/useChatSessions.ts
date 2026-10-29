@@ -73,11 +73,11 @@ export function useChatSessions(activeChatId: string | null = null) {
         makeApiCall<MandateRow[]>({ endpoint: "/api/me/mandates", method: HttpMethodEnum.Get, silent: true }),
         makeApiCall<AgentRow[]>({ endpoint: "/api/me/agents", method: HttpMethodEnum.Get, silent: true }),
       ]).then(([mandates, agents]) => {
-        const kindById = new Map((Array.isArray(agents) ? agents : []).filter((a) => a.managed && !a.revoked_at).map((a) => [a.id, a.kind]));
+        const managedIds = new Set((Array.isArray(agents) ? agents : []).filter((a) => a.managed && !a.revoked_at).map((a) => a.id));
         return (Array.isArray(mandates) ? mandates : [])
-          .filter((m) => !m.revoked_at && kindById.has(m.agent_id))
+          .filter((m) => !m.revoked_at && managedIds.has(m.agent_id))
           .map((m) => ({
-            id: m.id, agent_id: m.agent_id, agent_kind: kindById.get(m.agent_id), categories: m.categories, merchants: m.merchants,
+            id: m.id, agent_id: m.agent_id, categories: m.categories, merchants: m.merchants,
             budget: m.budget_amount, remaining: m.budget_amount, period: m.budget_period, currency: m.currency,
           }));
       }),
@@ -111,15 +111,12 @@ export function useChatSessions(activeChatId: string | null = null) {
     },
   });
 
-  const createChatMutation = useMutation<ChatSummaryItem, Error, { ruleId?: string | null; agentKind: AgentKind }>({
+  const createChatMutation = useMutation<ChatSummaryItem, Error, { ruleId?: string | null }>({
     mutationFn: (payload) =>
-      makeApiCall<ChatSummaryItem, { agent_kind: AgentKind; mandate_id?: string }>({
+      makeApiCall<ChatSummaryItem, { mandate_id?: string }>({
         endpoint: "/api/me/chats",
         method: HttpMethodEnum.Post,
-        payload: {
-          agent_kind: payload.agentKind,
-          ...(payload.ruleId ? { mandate_id: payload.ruleId } : {}),
-        },
+        payload: payload.ruleId ? { mandate_id: payload.ruleId } : {},
         silent: true,
       }),
     onSuccess: () => {

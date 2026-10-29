@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 
 from app.intents import verify_intent_signature
 from app.mandates import _is_active, merchant_allowed, select_mandate_for_agent, spent_in_period
-from app.models import Agent, Check, Intent, Order, User, WebOffer
+from app.models import Agent, Check, Intent, Order, User
 from app.notify import send_payment_notice
 from app.product_truth import domain_of
 from app.signing import to_utc, utcnow
@@ -305,11 +305,6 @@ def _p30(c):
 def _p31(c):
     if domain_of(c.order.merchant) is None:
         return False, "Store name is not a valid domain"
-    ids = [str(l.get("product_id", "")) for l in c.cart if str(l.get("product_id", "")).startswith("web_")]
-    for pid in ids:
-        offer = c.db.get(WebOffer, pid)
-        if offer is None or not (offer.paypal_evidence or "").strip():
-            return False, "Web offer has no proof the store accepts PayPal"
     return True, ""
 
 
@@ -344,7 +339,7 @@ CHECKS = (
     ("P28", "Store risk is low", _p28),
     ("P29", "No price anomaly", _p29),
     ("P30", "Store pages use HTTPS", _p30),
-    ("P31", "Store and offer are verifiable", _p31),
+    ("P31", "Store domain is valid", _p31),
 )
 NOTICE_ID = "P32"
 NOTICE_LABEL = "Payment notice emailed to you"

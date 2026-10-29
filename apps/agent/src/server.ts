@@ -10,8 +10,7 @@ import { env, withEnv } from "./config.ts";
 import { emit } from "./log.ts";
 import { Channel3Unavailable } from "./channel3Guard.ts";
 import { LlmLimitError } from "./llm.ts";
-import { RunError, runShopping, type RunResult } from "./run.ts";
-import type { ExactPick, WebSnapshot } from "./shop.ts";
+import { RunError, runShopping, type ExactPick, type RunResult } from "./run.ts";
 import { suggest, type Rule, type Turn } from "./suggest.ts";
 
 function authorized(header: string | undefined): boolean {
@@ -35,21 +34,6 @@ async function readJson(req: import("node:http").IncomingMessage, limit: number)
   } catch {
     return undefined;
   }
-}
-
-function webSnapshot(v: unknown): WebSnapshot | undefined {
-  if (typeof v !== "object" || v === null) return undefined;
-  const s = v as Record<string, unknown>;
-  const text = (x: unknown, max: number) => (typeof x === "string" && x.length > 0 && x.length <= max ? x : null);
-  const title = text(s.title, 300);
-  const merchant = text(s.merchant, 64);
-  const category = text(s.category, 64);
-  const url = text(s.url, 2048);
-  const price = text(s.price, 14);
-  if (!title || !merchant || !category || !url || !price || !url.startsWith("https://") || !/^\d{1,9}\.\d{2}$/.test(price)) {
-    return undefined;
-  }
-  return { title, price, merchant, url, category };
 }
 
 export function startServer(port = Number(env("PORT") ?? 8808), host = env("HOST") ?? "127.0.0.1"): Server {
@@ -130,18 +114,16 @@ export function startServer(port = Number(env("PORT") ?? 8808), host = env("HOST
         const rawItems: unknown[] | undefined = Array.isArray(body.items)
           ? body.items
           : body.product_id !== undefined ? [{ product_id: body.product_id, qty: body.qty ?? 1 }] : undefined;
-        let exact: ExactPick[] | undefined;
+        let exact: ExactPick | undefined;
         if (rawItems) {
           if (rawItems.length < 1 || rawItems.length > 10) return send(400, { reason: "invalid items" });
           exact = [];
-          for (const it of rawItems as { product_id?: unknown; qty?: unknown; snapshot?: unknown }[]) {
+          for (const it of rawItems as { product_id?: unknown; qty?: unknown }[]) {
             const qty = Number(it?.qty ?? 1);
             if (typeof it?.product_id !== "string" || it.product_id.length > 128 || !Number.isInteger(qty) || qty < 1 || qty > 20) {
               return send(400, { reason: "invalid product_id or qty" });
             }
-            const snapshot = webSnapshot(it.snapshot);
-            if (it.product_id.startsWith("web_") && !snapshot) return send(400, { reason: "invalid web snapshot" });
-            exact.push({ productId: it.product_id, qty, snapshot });
+            exact.push({ productId: it.product_id, qty });
           }
         }
         const creds = { AGENT_ID: body.agent_id, AGENT_PRIVATE_KEY: body.agent_private_key };

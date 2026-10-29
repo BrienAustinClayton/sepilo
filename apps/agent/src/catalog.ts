@@ -2,6 +2,12 @@ import { env } from "./config.ts";
 import { PRODUCT_ID, cleanPrice, cleanQuery, guardedJson } from "./channel3Guard.ts";
 import { publicGet } from "./intentlock.ts";
 
+export interface StoreOffer {
+  merchant: string;
+  price: string;
+  url: string | null;
+}
+
 export interface Product {
   product_id: string;
   merchant: string;
@@ -14,7 +20,8 @@ export interface Product {
   url: string | null; // public merchant page, or null
   page_candidates: string[]; // other public merchant pages (catalog offers) the scanner may be able to fetch
   variants: { name?: string; label?: string; product_id?: string }[];
-  source: "catalog" | "channel3" | "web";
+  source: "catalog" | "channel3";
+  offers?: StoreOffer[];
   brand?: string;
   category_title?: string;
   image?: string;
@@ -132,6 +139,28 @@ export const domainOf = (d: unknown): string | null => {
   return /^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$/.test(s) ? s : null;
 };
 
+const MAX_STORE_OFFERS = 8;
+
+function inStockOffers(raw: any): StoreOffer[] {
+  const cheapest = new Map<string, StoreOffer>();
+  for (const o of Array.isArray(raw.offers) ? raw.offers : []) {
+    const store = domainOf(o?.domain);
+    const availability = o?.availability;
+    if (!store || (availability !== undefined && availability !== null && availability !== "InStock")) continue;
+    if (o?.price?.currency !== undefined && String(o.price.currency).toUpperCase() !== "USD") continue;
+    let price: string;
+    try {
+      price = moneyString(o?.price?.price);
+    } catch {
+      continue;
+    }
+    if (toCents(price) <= 0) continue;
+    const have = cheapest.get(store);
+    if (!have || toCents(price) < toCents(have.price)) cheapest.set(store, { merchant: store, price, url: isPublicHttpUrl(o?.url) ? o.url : null });
+  }
+  return [...cheapest.values()].sort((a, b) => toCents(a.price) - toCents(b.price)).slice(0, MAX_STORE_OFFERS);
+}
+
 function fromChannel3(raw: any, merchant?: string): Product | null {
   try {
     const offer = raw.offers?.[0];
@@ -155,6 +184,7 @@ function fromChannel3(raw: any, merchant?: string): Product | null {
       page_candidates: (raw.offers ?? []).map((o: any) => o?.url).filter(isPublicHttpUrl).slice(0, 4),
       variants: [],
       source: "channel3",
+      offers: inStockOffers(raw),
     };
   } catch {
     return null;

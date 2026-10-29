@@ -76,7 +76,7 @@ export interface User {
   name: string;
 }
 
-export type AgentKind = "channel3" | "deals" | "custom";
+export type AgentKind = "channel3" | "custom";
 
 export interface Agent {
   id: string; // agt_

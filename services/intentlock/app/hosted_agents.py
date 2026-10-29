@@ -26,12 +26,12 @@ from app.config import settings
 from app.crypto.keys import generate_keypair_b64
 from app.db import new_session
 from app.ids import new_id
-from app.models import Agent, AgentRun, Order, WebOffer
+from app.models import Agent, AgentRun, Order
 
 log = logging.getLogger("intentlock.hosted_agents")
 
 RUN_TIMEOUT_S = 300
-DEFAULT_AGENTS = (("channel3", "Sepilo Shopper"), ("deals", "Sepilo Deal Finder"))
+DEFAULT_AGENTS = (("channel3", "Sepilo Shopper"),)
 STALE_AFTER = timedelta(minutes=10)
 UNSENT_GRACE = timedelta(seconds=15)
 
@@ -78,7 +78,7 @@ def new_hosted_agent(user_id: str, name: str, kind: str = "channel3") -> Agent:
 
 
 def ensure_default_agents(db, user_id: str) -> None:
-    """Give every user the two Sepilo agents. A kind the user already has (even a disconnected one) is left alone."""
+    """Give every user the Sepilo Shopper agent. A kind the user already has (even a disconnected one) is left alone."""
     try:
         db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"default-agents:{user_id}"))))
         have = set(db.execute(select(Agent.kind).where(Agent.user_id == user_id, Agent.managed.is_(True))).scalars())
@@ -152,27 +152,6 @@ def _claim(db, run_id: str, endpoint: str) -> bool:
     return got is not None
 
 
-def _web_snapshot(db, product_id: str) -> dict[str, Any] | None:
-    offer = db.get(WebOffer, product_id)
-    if offer is None:
-        return None
-    return {"title": offer.title, "price": f"{Decimal(offer.price):.2f}", "merchant": offer.merchant,
-            "url": offer.url, "category": offer.category or "other"}
-
-
-def _run_items(db, run: AgentRun) -> dict[str, Any]:
-    """What the agent should buy; web deals carry a snapshot (the agent can't look them up, and checkout re-verifies)."""
-    if run.items:
-        return {"items": [{**i, "snapshot": _web_snapshot(db, str(i.get("product_id")))}
-                          if str(i.get("product_id", "")).startswith("web_") else i for i in run.items]}
-    if run.product_id:
-        if run.product_id.startswith("web_"):
-            return {"items": [{"product_id": run.product_id, "qty": run.qty or 1,
-                               "snapshot": _web_snapshot(db, run.product_id)}]}
-        return {"product_id": run.product_id, "qty": run.qty or 1}
-    return {}
-
-
 def execute_run(run_id: str, db=None) -> None:
     """Ask the hosted agent service to shop for one purchase request and record what came back."""
     own = db is None
@@ -204,7 +183,8 @@ def execute_run(run_id: str, db=None) -> None:
             r = httpx.post(endpoint, timeout=RUN_TIMEOUT_S,
                            headers={"Authorization": f"Bearer {secret}", "X-IntentLock-Run": run.id},
                            json={"intent_id": run.intent_id, "agent_id": agent.id, "agent_private_key": key,
-                                 **_run_items(db, run)})
+                                 **({"items": run.items} if run.items else
+                                    {"product_id": run.product_id, "qty": run.qty or 1} if run.product_id else {})})
         except httpx.HTTPError as e:
             run.response_ms = int((time.monotonic() - t0) * 1000)
             run.response_excerpt = f"{type(e).__name__}: {str(e)[:300]}"

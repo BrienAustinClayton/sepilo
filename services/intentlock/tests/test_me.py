@@ -181,14 +181,14 @@ def test_hosted_agent_key_is_sealed_and_never_returned(client, db, two, hosted):
 def test_default_agents_are_created_once_and_a_disconnect_is_respected(client, db, two, hosted):
     (alice, ha), _ = two
     first = client.get("/me/agents", headers=ha).json()
-    assert sorted((a["kind"], a["name"]) for a in first) == [("channel3", "Sepilo Shopper"), ("deals", "Sepilo Deal Finder")]
+    assert sorted((a["kind"], a["name"]) for a in first) == [("channel3", "Sepilo Shopper")]
     assert client.get("/me/agents", headers=ha).json() == first
-    deals_agent = _hosted_agent(client, ha, "deals")
-    assert client.post(f"/me/agents/{deals_agent['id']}/revoke", headers=ha).status_code == 200
+    shopper = _hosted_agent(client, ha, "channel3")
+    assert client.post(f"/me/agents/{shopper['id']}/revoke", headers=ha).status_code == 200
     again = client.get("/me/agents", headers=ha).json()
-    assert len(again) == 2 and next(a for a in again if a["kind"] == "deals")["revoked_at"]
+    assert len(again) == 1 and again[0]["revoked_at"]
     hosted_agents.ensure_default_agents(db, alice.id)
-    assert db.query(Agent).filter(Agent.user_id == alice.id).count() == 2
+    assert db.query(Agent).filter(Agent.user_id == alice.id).count() == 1
     assert client.post("/me/agents/hosted", headers=ha, json={"name": "x"}).status_code in (404, 405)
 
 
@@ -313,9 +313,10 @@ from app.models import Chat, ChatMessage, Intent  # noqa: E402
 SUGGESTED = [
     {"product_id": "c3_cable", "title": "USB-C to USB-C Cable 1m", "brand": "Baseus", "price": "9.99", "currency": "USD",
      "merchant": "baseus.com", "category": "electronics", "category_title": "Electronics",
-     "image": "https://cdn.example/c.png", "url": "https://buy.example/c"},
+     "image": "https://cdn.example/c.png", "url": "https://buy.example/c", "compare_price": "14.50", "store_count": 3},
     {"product_id": "bad_price", "title": "x", "price": "9.9", "merchant": "m.com"},
-    {"product_id": "js_url", "title": "y", "price": "1.00", "merchant": "m.com", "image": "javascript:alert(1)"},
+    {"product_id": "js_url", "title": "y", "price": "1.00", "merchant": "m.com", "image": "javascript:alert(1)",
+     "compare_price": "0.50", "store_count": 500},
 ]
 
 
@@ -372,6 +373,8 @@ def test_chat_suggest_history_rules_and_cleaning(client, db, two, chat_agent):
     products = out["messages"][1]["products"]
     assert [p["product_id"] for p in products] == ["c3_cable", "js_url"]
     assert products[1]["image"] is None
+    assert (products[0]["compare_price"], products[0]["store_count"]) == ("14.50", 3)
+    assert (products[1]["compare_price"], products[1]["store_count"]) == (None, None)
     body = [kw["json"] for u, kw in calls if u.endswith("/suggest")][0]
     assert body["rules"][0]["remaining"] == "50.00" and body["rules"][0]["merchants"] == ["*"]
     assert body["history"] == []

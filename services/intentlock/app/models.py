@@ -61,7 +61,7 @@ class Agent(Base):
     device_id = Column(String, nullable=False)
     verified = Column(Boolean, nullable=False, default=False)
     managed = Column(Boolean, nullable=False, default=False, server_default="false")
-    kind = Column(String, nullable=False, default="custom", server_default="custom")  # channel3 | deals | custom
+    kind = Column(String, nullable=False, default="custom", server_default="custom")  # channel3 | custom
     secret_enc = Column(Text, nullable=True)  # AES-GCM sealed private key, hosted agents only
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -409,19 +409,3 @@ class Dispute(Base):
             name="ck_disputes_suggestion",
         ),
     )
-
-
-class WebOffer(Base):
-    """A product offer the Sepilo deal agent found on the open web (Firecrawl), re-checked before checkout."""
-    __tablename__ = "web_offers"
-
-    product_id = Column(String, primary_key=True)  # web_<sha256(canonical url)[:24]>
-    url = Column(String, nullable=False)
-    merchant = Column(String, nullable=False)  # store domain
-    title = Column(String, nullable=False)
-    price = Column(Numeric(12, 2), nullable=False)
-    currency = Column(String(3), nullable=False, default="USD")
-    category = Column(String, nullable=True)
-    image = Column(String, nullable=True)
-    paypal_evidence = Column(Text, nullable=True)  # page text showing the store accepts PayPal
-    fetched_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
