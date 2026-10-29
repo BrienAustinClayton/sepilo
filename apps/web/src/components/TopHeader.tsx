@@ -6,7 +6,7 @@ import { ChevronRight, House, Menu } from "lucide-react";
 import { findNav } from "@/lib/nav";
 
 const DETAIL: Record<string, (id: string) => string> = {
-  "/orders": (id) => `Order ${id.slice(-6).toUpperCase()}`,
+  "/orders": (id) => (id === "checks" ? "Security checks" : `Order ${id.slice(-6).toUpperCase()}`),
 };
 
 export default function TopHeader({ onMenu }: { onMenu?: () => void }) {

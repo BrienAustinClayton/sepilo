@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from app import auth
 from conftest import prepare_capturable  # noqa: E402
 from app.ids import new_id
-from app.models import Order, User
+from app.models import Check, Order, User
 
 
 def _pub() -> str:
@@ -88,6 +88,48 @@ def test_agents_requests_orders_are_isolated(client, db, two):
     assert client.get(f"/me/orders/{paid.id}", headers=ha).json()["id"] == paid.id
     assert client.post(f"/me/orders/{held.id}/approval", headers=hb, json={"decision": "approve"}).status_code == 404
     assert client.post(f"/me/agents/{agent['id']}/revoke", headers=hb).status_code == 404
+
+
+def _preflight(db, order, items, passed, total=32):
+    db.add(Check(id=new_id("chk"), order_id=order.id, step="preflight", result="pass" if passed == total else "fail",
+                 details_json={"checks": items, "passed": passed, "total": total}, duration_ms=5))
+    db.flush()
+
+
+def test_order_list_carries_check_summary(client, db, two):
+    (alice, ha), (bob, hb) = two
+    agent = _agent(client, ha)
+    intent = client.post("/me/requests", headers=ha, json={"agent_id": agent["id"], "request_text": "2 litres of milk"}).json()
+    clean = _order(db, alice, intent["id"], agent["id"], "captured")
+    held = _order(db, alice, intent["id"], agent["id"], "pending_approval")
+    early = _order(db, alice, intent["id"], agent["id"], "rejected")
+    _preflight(db, clean, [{"id": "P01", "label": "Agent signature verified", "status": "pass", "detail": ""}], 32)
+    _preflight(db, held, [
+        {"id": "P22", "label": "Shipping address on file", "status": "fail", "detail": "No shipping address on file"},
+        {"id": "P23", "label": "Shipping address is complete", "status": "fail", "detail": "x"},
+        {"id": "P24", "label": "Shipping country matches your country", "status": "fail", "detail": "y"},
+        {"id": "P32", "label": "Payment notice emailed to you", "status": "fail", "detail": "not_sent"},
+    ], 28)
+
+    rows = {o["id"]: o for o in client.get("/me/orders", headers=ha).json()}
+    assert rows[clean.id]["checks"] == {"passed": 32, "total": 32, "failed": []}
+    assert rows[held.id]["checks"] == {
+        "passed": 28, "total": 32, "failed": ["Shipping address on file", "Shipping address is complete"]}
+    assert rows[early.id]["checks"] is None
+    assert client.get("/me/orders", headers=hb).json() == []
+
+
+def test_order_counts_are_per_user_and_bucketed(client, db, two):
+    (alice, ha), (bob, hb) = two
+    agent = _agent(client, ha)
+    intent = client.post("/me/requests", headers=ha, json={"agent_id": agent["id"], "request_text": "2 litres of milk"}).json()
+    for status in ("captured", "captured", "voided", "failed", "pending_approval", "checking", "awaiting_payment"):
+        _order(db, alice, intent["id"], agent["id"], status)
+    assert client.get("/me/orders/counts", headers=ha).json() == {
+        "all": 7, "needs_approval": 1, "paid": 2, "blocked": 2, "in_progress": 2}
+    assert client.get("/me/orders/counts", headers=hb).json() == {
+        "all": 0, "needs_approval": 0, "paid": 0, "blocked": 0, "in_progress": 0}
+    assert client.get("/me/orders/counts").status_code == 401
 
 
 def test_rules_only_on_own_agents(client, two):
@@ -529,6 +571,17 @@ def test_proof_is_private_to_the_owner_and_checks_hide_internals(client, db, two
     assert checks["intent_diff"]["details"] == {"items": [{"product_id": "p", "title": "Shoe", "explained": "yes",
                                                            "issue": "none", "reason": "ok"}], "price_anomaly": False}
     assert checks["scan_injection"]["details"] is None and checks["scan_injection"]["score"] is None
+
+
+def test_order_detail_exposes_the_32_checks_list(client, db, two):
+    (alice, ha), _ = two
+    agent = _agent(client, ha)
+    intent = client.post("/me/requests", headers=ha, json={"agent_id": agent["id"], "request_text": "kids shoes size 3"}).json()
+    o = _order(db, alice, intent["id"], agent["id"], "pending_approval")
+    item = {"id": "P22", "label": "Shipping address on file", "status": "fail", "detail": "No shipping address on file"}
+    _preflight(db, o, [item], 31)
+    details = client.get(f"/me/orders/{o.id}", headers=ha).json()["checks"][0]["details"]
+    assert details == {"checks": [item], "passed": 31, "total": 32}
 
 
 def test_agent_cannot_claim_someone_elses_order(client, db, two, hosted):

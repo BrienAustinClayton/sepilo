@@ -17,7 +17,29 @@ export function OrderCartItemsTable({ items, currency }: CartItemsTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <>
+      <ul className="sm:hidden divide-y divide-line">
+        {items.map((item: CartItemDetails) => {
+          const unitPrice = item.unit_price ?? "0.00";
+          return (
+            <li key={item.product_id} className="flex items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-fg-2 line-clamp-2">{item.title}</div>
+                <div className="text-xs text-fg-muted">{item.category}</div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-sm font-semibold tabular-nums text-fg">
+                  {formatCurrency(calculateLineTotal(unitPrice, item.qty), currency)}
+                </div>
+                <div className="text-xs tabular-nums text-fg-dim">
+                  {item.qty} × {formatCurrency(unitPrice, currency)}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    <div className="hidden sm:block overflow-x-auto">
       <table className="w-full border-collapse">
         <thead className="border-b border-line bg-fg/2">
           <tr>
@@ -53,5 +75,6 @@ export function OrderCartItemsTable({ items, currency }: CartItemsTableProps) {
         </tbody>
       </table>
     </div>
+    </>
   );
 }

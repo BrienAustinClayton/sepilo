@@ -37,6 +37,7 @@ export enum SecurityCheckResultEnum {
   Fail = "fail",
   Flag = "flag",
   Skip = "skip",
+  Skipped = "skipped",
   Error = "error",
 }
 

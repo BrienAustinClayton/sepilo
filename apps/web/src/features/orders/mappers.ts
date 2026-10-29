@@ -1,6 +1,6 @@
 import { OrderApprovalRecord, OrderDetailResponse, OrderSummary, SecurityCheckRecord } from "./types";
 
-export interface ApiOrderDetail extends Omit<OrderSummary, "approval_timeout_at" | "decision_reasons"> {
+export interface ApiOrderDetail extends Omit<OrderSummary, "approval_timeout_at" | "decision_reasons" | "checks"> {
   reasons?: string[] | null;
   pay_url?: string | null;
   approval?: (Omit<OrderApprovalRecord, "reason"> & { expires_at: string | null }) | null;

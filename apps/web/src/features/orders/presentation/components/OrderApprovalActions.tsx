@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, TriangleAlert, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { OrderApprovalActionsProps } from "../../componentTypes";
 import { Button } from "@/shared/presentation/components/Button";
 import { Input } from "@/shared/presentation/components/Input";
@@ -23,48 +23,43 @@ export function OrderApprovalActions({
   const canApprove = !needsTypedTotal || typedMatches;
 
   return (
-    <div className="saas-card p-4 border-amber-500/30 bg-amber-500/5 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400">
-          <TriangleAlert className="w-5 h-5" strokeWidth={1.8} />
-        </span>
-        <div>
-          <h2 className="text-sm font-semibold text-fg">Approval required</h2>
-          <p className="text-xs text-fg-muted max-w-lg">
-            This order was held by policy checks. Funds are held in PayPal but not captured until you approve.
-            {timeoutAt !== null && " Approval expires in 30 minutes."}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+    <div className="max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:border-t max-sm:border-line max-sm:bg-canvas max-sm:p-3 max-sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:mt-5 sm:border-t sm:border-amber-500/20 sm:pt-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         {needsTypedTotal && (
           <Input
             value={typedTotal}
             onChange={setTypedTotal}
             maxLength={20}
             placeholder={`Type ${amount.toFixed(2)} to approve`}
-            className="h-10 sm:w-44"
+            className="h-10 w-full sm:w-52"
           />
         )}
-        <Button
-          variant={ButtonVariantEnum.Primary}
-          isLoading={isProcessing}
-          disabled={!canApprove}
-          onClick={() => onApprove(needsTypedTotal ? typedTotal : undefined)}
-        >
-          <Check className="w-4 h-4" strokeWidth={2} />
-          Approve order
-        </Button>
-        <Button
-          variant={ButtonVariantEnum.Danger}
-          disabled={isProcessing}
-          onClick={onDecline}
-        >
-          <X className="w-4 h-4" strokeWidth={2} />
-          Decline
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={ButtonVariantEnum.Primary}
+            isLoading={isProcessing}
+            disabled={!canApprove}
+            onClick={() => onApprove(needsTypedTotal ? typedTotal : undefined)}
+            className="flex-1 sm:flex-none"
+          >
+            <Check className="w-4 h-4" strokeWidth={2} />
+            Approve order
+          </Button>
+          <Button
+            variant={ButtonVariantEnum.Danger}
+            disabled={isProcessing}
+            onClick={onDecline}
+            className="flex-1 sm:flex-none"
+          >
+            <X className="w-4 h-4" strokeWidth={2} />
+            Decline
+          </Button>
+        </div>
       </div>
+      <p className="mt-2 hidden sm:block text-xs text-fg-muted">
+        Funds are held in PayPal but not charged until you approve.
+        {timeoutAt !== null && " Approval expires in 30 minutes."}
+      </p>
     </div>
   );
 }
