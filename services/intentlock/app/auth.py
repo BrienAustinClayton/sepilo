@@ -105,6 +105,15 @@ def next_step(user: User) -> str:
     return "app"
 
 
+def dispute_manager_emails() -> set[str]:
+    raw = _cfg("DISPUTE_MANAGER_EMAILS") or ""
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def is_dispute_manager(user: User) -> bool:
+    return bool(user.email and user.email_verified_at is not None and user.email.strip().lower() in dispute_manager_emails())
+
+
 def user_dto(user: User) -> dict[str, Any]:
     return {
         "id": user.id,
@@ -116,6 +125,7 @@ def user_dto(user: User) -> dict[str, Any]:
         "company": user.company,
         "onboarding": user.onboarding,
         "next": next_step(user),
+        "role": "dispute_manager" if is_dispute_manager(user) else "user",
     }
 
 
@@ -151,6 +161,12 @@ def current_user(sess: UserSession = Depends(current_session), db: Session = Dep
     user = db.get(User, sess.user_id)
     if user is None:
         raise HTTPException(status_code=401, detail={"error": "unauthenticated", "reason": "Sign in required."})
+    return user
+
+
+def require_dispute_manager(user: User = Depends(current_user)) -> User:
+    if not is_dispute_manager(user):
+        raise HTTPException(status_code=403, detail={"error": "forbidden", "reason": "Dispute managers only."})
     return user
 
 
