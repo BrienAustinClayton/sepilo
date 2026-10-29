@@ -3,9 +3,10 @@
 import React from "react";
 import { Check as CheckIcon, Flag, Minus, X } from "lucide-react";
 import { SecurityTimelineProps } from "../../componentTypes";
-import { SecurityCheckResultEnum } from "../../enums";
+import { SecurityCheckResultEnum, SecurityCheckStepEnum } from "../../enums";
 import { SecurityCheckRecord } from "../../types";
-import { getStepDisplayName } from "../../utils";
+import { getStepDisplayName, readPreflight } from "../../utils";
+import { PreflightChecklist } from "./PreflightChecklist";
 
 export function SecurityChecksTimeline({ checks }: SecurityTimelineProps) {
   const hasNoChecks = checks.length === 0;
@@ -34,32 +35,36 @@ export function SecurityChecksTimeline({ checks }: SecurityTimelineProps) {
           : "bg-neutral-500/10 text-neutral-400 border border-neutral-500/20";
 
         const stepName = getStepDisplayName(check.step);
+        const preflight = check.step === SecurityCheckStepEnum.Preflight ? readPreflight(check.details) : null;
 
         return (
-          <div key={index} className="flex items-center justify-between p-3.5">
-            <div className="flex items-center gap-3">
-              <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-semibold ${badgeColor}`}>
-                {isPass ? (
-                  <CheckIcon className="w-3.5 h-3.5" strokeWidth={2.5} />
-                ) : isFail ? (
-                  <X className="w-3.5 h-3.5" strokeWidth={2.5} />
-                ) : isFlag ? (
-                  <Flag className="w-3.5 h-3.5" strokeWidth={2} />
-                ) : (
-                  <Minus className="w-3.5 h-3.5" />
-                )}
-              </span>
-              <div>
-                <div className="text-sm font-medium text-fg">{stepName}</div>
-                <div className="text-xs text-fg-dim">
-                  Latency: {check.latency_ms} ms
+          <div key={index}>
+            <div className="flex items-center justify-between p-3.5">
+              <div className="flex items-center gap-3">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-semibold ${badgeColor}`}>
+                  {isPass ? (
+                    <CheckIcon className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  ) : isFail ? (
+                    <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  ) : isFlag ? (
+                    <Flag className="w-3.5 h-3.5" strokeWidth={2} />
+                  ) : (
+                    <Minus className="w-3.5 h-3.5" />
+                  )}
+                </span>
+                <div>
+                  <div className="text-sm font-medium text-fg">{stepName}</div>
+                  <div className="text-xs text-fg-dim">
+                    Latency: {check.latency_ms} ms
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider ${badgeColor}`}>
-              {check.result}
-            </span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wider ${badgeColor}`}>
+                {check.result}
+              </span>
+            </div>
+            {preflight && <PreflightChecklist summary={preflight} />}
           </div>
         );
       })}

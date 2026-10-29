@@ -13,6 +13,7 @@ export type Me = {
   onboarding: Record<string, unknown> | null;
   next: "signup" | "onboarding" | "app";
   has_address?: boolean;
+  role: "user" | "dispute_manager";
 };
 
 let pending: Promise<Me | null> | null = null;
