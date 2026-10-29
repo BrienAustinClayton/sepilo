@@ -7,7 +7,6 @@ import { useAgentsManagement } from "../../hooks/useAgentsManagement";
 import { ShoppingAgent } from "../../types";
 import { AgentsTable } from "../components/AgentsTable";
 import { ConnectCustomAgentForm } from "../components/ConnectCustomAgentForm";
-import { CreateHostedAgentForm } from "../components/CreateHostedAgentForm";
 
 export function AgentsPage() {
   const [activeModal, setActiveModal] = useState<AgentModalTypeEnum>(
@@ -24,7 +23,6 @@ export function AgentsPage() {
     revokeAgent(agent.id);
   };
 
-  const isHostedModalOpen = activeModal === AgentModalTypeEnum.Hosted;
   const isCustomModalOpen = activeModal === AgentModalTypeEnum.Own;
   const isModalClosed = activeModal === AgentModalTypeEnum.None;
 
@@ -49,22 +47,9 @@ export function AgentsPage() {
               <Plug className="w-4 h-4" strokeWidth={1.8} />
               Connect your own
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveModal(AgentModalTypeEnum.Hosted)}
-              className="intentlock-btn-primary"
-            >
-              Create agent
-            </button>
           </div>
         )}
       </div>
-
-      {isHostedModalOpen && (
-        <CreateHostedAgentForm
-          onClose={() => setActiveModal(AgentModalTypeEnum.None)}
-        />
-      )}
 
       {isCustomModalOpen && (
         <ConnectCustomAgentForm

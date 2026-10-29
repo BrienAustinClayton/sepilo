@@ -14,7 +14,7 @@ export interface Product {
   url: string | null; // public merchant page, or null
   page_candidates: string[]; // other public merchant pages (catalog offers) the scanner may be able to fetch
   variants: { name?: string; label?: string; product_id?: string }[];
-  source: "catalog" | "channel3";
+  source: "catalog" | "channel3" | "web";
   brand?: string;
   category_title?: string;
   image?: string;

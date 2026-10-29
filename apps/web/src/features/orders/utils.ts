@@ -1,5 +1,5 @@
-import { OrderStatusEnum } from "./enums";
-import { SecurityCheckStepEnum } from "./enums";
+import { OrderStatusEnum, PreflightStatusEnum, SecurityCheckStepEnum } from "./enums";
+import { PreflightItem, PreflightSummary } from "./types";
 
 export function formatCurrency(amount: string | number, currency: string = "USD"): string {
   const numericAmount = Number(amount);
@@ -51,6 +51,7 @@ export function getStepDisplayName(step: SecurityCheckStepEnum): string {
     [SecurityCheckStepEnum.ScanInjection]: "Scan Injection",
     [SecurityCheckStepEnum.IntentDiff]: "Intent Diff",
     [SecurityCheckStepEnum.GraphRisk]: "Graph Risk",
+    [SecurityCheckStepEnum.Preflight]: "32 security checks",
     [SecurityCheckStepEnum.Decide]: "Decide",
     [SecurityCheckStepEnum.CaptureOrVoid]: "Capture or Void",
     [SecurityCheckStepEnum.BuildProof]: "Build Proof",
@@ -58,7 +59,7 @@ export function getStepDisplayName(step: SecurityCheckStepEnum): string {
   return labels[step] || step;
 }
 
-const TONE = {
+export const TONE = {
   success: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
   danger: "bg-rose-500/10 text-rose-400 border border-rose-500/20",
   warning: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
@@ -68,6 +69,7 @@ const TONE = {
 const STATUS_TAG: Partial<Record<OrderStatusEnum, { label: string; style: string }>> = {
   [OrderStatusEnum.Captured]: { label: "Paid", style: TONE.success },
   [OrderStatusEnum.Voided]: { label: "Blocked", style: TONE.danger },
+  [OrderStatusEnum.Refunded]: { label: "Refunded", style: TONE.brand },
   [OrderStatusEnum.Rejected]: { label: "Blocked", style: TONE.danger },
   [OrderStatusEnum.Failed]: { label: "Failed", style: TONE.danger },
   [OrderStatusEnum.PendingApproval]: { label: "Needs Approval", style: TONE.warning },
@@ -76,4 +78,37 @@ const STATUS_TAG: Partial<Record<OrderStatusEnum, { label: string; style: string
 
 export function orderStatusTag(status: OrderStatusEnum): { label: string; style: string } {
   return STATUS_TAG[status] ?? { label: "Checking", style: TONE.brand };
+}
+
+const PREFLIGHT_TOTAL = 32;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toPreflightItem(value: unknown): PreflightItem | null {
+  if (!isRecord(value)) return null;
+  const { id, label, status, detail } = value;
+  if (typeof id !== "string" || typeof label !== "string" || typeof status !== "string") return null;
+  const detailText = typeof detail === "string" ? detail : "";
+  const known = Object.values(PreflightStatusEnum).find((s) => s === status);
+  if (!known) return null;
+  const isNotSent = known === PreflightStatusEnum.Fail && detailText === "not_sent";
+  return {
+    id,
+    label,
+    status: isNotSent ? PreflightStatusEnum.NotSent : known,
+    detail: isNotSent ? "" : detailText,
+  };
+}
+
+export function readPreflight(details: Record<string, unknown> | null): PreflightSummary | null {
+  if (!details || !Array.isArray(details.checks)) return null;
+  const items = details.checks.map(toPreflightItem).filter((item): item is PreflightItem => item !== null);
+  if (items.length === 0) return null;
+  const passed = items.filter(
+    (item) => item.status === PreflightStatusEnum.Pass || item.status === PreflightStatusEnum.Accepted,
+  ).length;
+  const total = typeof details.total === "number" ? details.total : PREFLIGHT_TOTAL;
+  return { items, passed, total };
 }

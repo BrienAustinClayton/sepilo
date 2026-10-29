@@ -123,6 +123,10 @@ services:
       # Operator key for admin-only routes (X-Admin-Key); generated, never needed by users
       - key: ADMIN_API_KEY
         generateValue: true
+      - key: DISPUTE_MANAGER_EMAILS
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
       - key: LAB_RESET_ENABLED
         value: "1"
 

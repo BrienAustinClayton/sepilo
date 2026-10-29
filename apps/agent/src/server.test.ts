@@ -38,6 +38,18 @@ test("hosted run with agent credentials needs the run secret", async () => {
   assert.equal((await run({ ...body, agent_id: "nope" }, "Bearer s3cret-value")).status, 400);
 });
 
+test("web deal items need a valid snapshot", async () => {
+  const body = { intent_id: "int_x", agent_id: "agt_x", agent_private_key: "k" };
+  const snapshot = { title: "Cable", price: "12.99", merchant: "shop.test", url: "https://www.shop.test/p", category: "electronics" };
+  const rejected = async (snap?: unknown) => {
+    const res = await run({ ...body, items: [{ product_id: "web_abc", qty: 1, snapshot: snap }] }, "Bearer s3cret-value");
+    return [res.status, (await res.json()).reason];
+  };
+  assert.deepEqual(await rejected(), [400, "invalid web snapshot"]);
+  assert.deepEqual(await rejected({ ...snapshot, price: "12.9" }), [400, "invalid web snapshot"]);
+  assert.deepEqual(await rejected({ ...snapshot, url: "http://shop.test/p" }), [400, "invalid web snapshot"]);
+});
+
 test("ping answers cron jobs without credentials", async () => {
   const server = startServer(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));

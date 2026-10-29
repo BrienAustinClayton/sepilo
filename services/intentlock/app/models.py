@@ -39,6 +39,8 @@ class User(Base):
     currency = Column(String(3), nullable=True)
     company = Column(String, nullable=True)
     onboarding = Column(JSONB, nullable=True)
+    shipping_address = Column(JSONB, nullable=True)  # {name, line1, line2?, city, region?, postal_code, country, phone?}
+    address_updated_at = Column(DateTime(timezone=True), nullable=True)
     signup_completed_at = Column(DateTime(timezone=True), nullable=True)
     onboarded_at = Column(DateTime(timezone=True), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
@@ -59,6 +61,7 @@ class Agent(Base):
     device_id = Column(String, nullable=False)
     verified = Column(Boolean, nullable=False, default=False)
     managed = Column(Boolean, nullable=False, default=False, server_default="false")
+    kind = Column(String, nullable=False, default="custom", server_default="custom")  # channel3 | deals | custom
     secret_enc = Column(Text, nullable=True)  # AES-GCM sealed private key, hosted agents only
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -140,7 +143,7 @@ class Order(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('received', 'awaiting_payment', 'rejected', 'authorized', 'checking', 'captured', 'voided', 'pending_approval', 'failed')",
+            "status IN ('received', 'awaiting_payment', 'rejected', 'authorized', 'checking', 'captured', 'voided', 'pending_approval', 'failed', 'refunded')",
             name="ck_orders_status",
         ),
         CheckConstraint(
@@ -172,7 +175,7 @@ class Check(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "step IN ('verify_agent', 'check_mandate', 'authorize_payment', 'scan_injection', 'intent_diff', 'graph_risk', 'decide', 'capture_or_void', 'build_proof')",
+            "step IN ('verify_agent', 'check_mandate', 'authorize_payment', 'scan_injection', 'intent_diff', 'graph_risk', 'decide', 'preflight', 'capture_or_void', 'build_proof')",
             name="ck_checks_step",
         ),
         CheckConstraint(
@@ -371,3 +374,54 @@ class ChatMessage(Base):
     intent_id = Column(String, ForeignKey("intents.id"), nullable=True)
     run_id = Column(String, ForeignKey("agent_runs.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Dispute(Base):
+    """A user's complaint about a paid order, triaged by Jev and decided by a dispute manager."""
+    __tablename__ = "disputes"
+
+    id = Column(String, primary_key=True)
+    order_id = Column(String, ForeignKey("orders.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    reason = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="open")
+    priority = Column(Integer, nullable=False, default=50)  # 0-100, higher = look first
+    priority_label = Column(String, nullable=False, default="normal")
+    suggestion = Column(String, nullable=True)
+    ai_reasons = Column(JSONB, nullable=True)  # [str] plain reasons behind priority and suggestion
+    ai_source = Column(String, nullable=True)  # jev | rules
+    decided_by = Column(String, ForeignKey("users.id"), nullable=True)
+    decision_note = Column(Text, nullable=True)
+    refund_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason IN ('not_received', 'not_as_described', 'unauthorized', 'duplicate', 'other')",
+            name="ck_disputes_reason",
+        ),
+        CheckConstraint("status IN ('open', 'refunded', 'rejected', 'failed')", name="ck_disputes_status"),
+        CheckConstraint("priority_label IN ('urgent', 'high', 'normal', 'low')", name="ck_disputes_priority_label"),
+        CheckConstraint(
+            "suggestion IS NULL OR suggestion IN ('refund', 'reject', 'investigate')",
+            name="ck_disputes_suggestion",
+        ),
+    )
+
+
+class WebOffer(Base):
+    """A product offer the Sepilo deal agent found on the open web (Firecrawl), re-checked before checkout."""
+    __tablename__ = "web_offers"
+
+    product_id = Column(String, primary_key=True)  # web_<sha256(canonical url)[:24]>
+    url = Column(String, nullable=False)
+    merchant = Column(String, nullable=False)  # store domain
+    title = Column(String, nullable=False)
+    price = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="USD")
+    category = Column(String, nullable=True)
+    image = Column(String, nullable=True)
+    paypal_evidence = Column(Text, nullable=True)  # page text showing the store accepts PayPal
+    fetched_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

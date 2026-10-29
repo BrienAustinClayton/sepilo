@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app import hosted_agents, runlog, velocity
+from app import deals, hosted_agents, runlog, velocity
 from app.cart_review import review_cart
 from app.product_truth import ProductUnavailable, current_offer
 from app.untrusted import clean, guard_reply, had_hidden_chars, talks_to_agent
@@ -124,7 +124,8 @@ def _runs_for(db: Session, messages: list[ChatMessage]) -> dict[str, dict]:
 def _agent_view(a: Optional[Agent]) -> Optional[dict[str, Any]]:
     if a is None:
         return None
-    return {"id": a.id, "name": a.name, "managed": bool(a.managed), "active": a.revoked_at is None}
+    return {"id": a.id, "name": a.name, "managed": bool(a.managed), "kind": a.kind,
+            "active": a.revoked_at is None}
 
 
 def _add(db: Session, chat: Chat, role: str, content: str, **extra) -> ChatMessage:
@@ -159,6 +160,7 @@ class ChatCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: Optional[str] = Field(default=None, max_length=64)
     mandate_id: Optional[str] = Field(default=None, max_length=64)
+    agent_kind: Optional[Literal["channel3", "deals"]] = None
 
 
 @router.post("", status_code=201)
@@ -168,13 +170,15 @@ def create_chat(body: ChatCreate, user: User = Depends(current_user), db: Sessio
         if agent is None or agent.user_id != user.id:
             raise _not_found("agent")
     else:
+        hosted_agents.ensure_default_agents(db, user.id)
         agent = db.execute(
-            select(Agent).where(Agent.user_id == user.id, Agent.managed.is_(True), Agent.revoked_at.is_(None))
+            select(Agent).where(Agent.user_id == user.id, Agent.managed.is_(True), Agent.revoked_at.is_(None),
+                                Agent.kind == (body.agent_kind or "channel3"))
             .order_by(Agent.created_at.desc())
         ).scalars().first()
     if agent is None or not agent.managed or agent.revoked_at is not None:
         raise HTTPException(409, detail={"error": "no_hosted_agent",
-                                         "reason": "Create a hosted agent first. It's the one that shops in chat."})
+                                         "reason": "That Sepilo agent is disconnected. Reconnect it on the Agents page."})
     if body.mandate_id:
         _check_rule(db, agent.id, body.mandate_id)
     now = utcnow()
@@ -275,7 +279,8 @@ def send_message(chat_id: str, body: MessageIn, user: User = Depends(current_use
                      "Add one under Spending rules (categories, stores and a budget) and ask again.")
     else:
         try:
-            data = hosted_agents.suggest(agent.id, body.content, history, rules)
+            data = (deals.suggest(db, user.id, body.content, history, rules) if agent.kind == "deals"
+                    else hosted_agents.suggest(agent.id, body.content, history, rules))
             products = _clean_products(data.get("products"))
             text = guard_reply(data.get("reply")) or (
                 "Here's what I found." if products else "I couldn't find anything that fits.")
@@ -379,6 +384,8 @@ def checkout_cart(chat_id: str, background: BackgroundTasks, body: Optional[Chec
     """The user's approval: one signed purchase request per store, listing exactly the approved items.
     The cart is checked first (rules, Channel3, listing text, Jev); nothing is bought if it's blocked."""
     chat = _own_chat(db, user, chat_id)
+    if not user.shipping_address:
+        raise HTTPException(409, detail={"error": "address_required", "reason": "Add a shipping address before buying."})
     lines = list(chat.cart or [])
     if not lines:
         raise HTTPException(409, detail={"error": "cart_empty", "reason": "Your cart is empty."})

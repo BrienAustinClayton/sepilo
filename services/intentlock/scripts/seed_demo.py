@@ -1,6 +1,7 @@
 """Seed demo data: user usr_demo_priya and agent agt_demo_shopper."""
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Allow running as `python scripts/seed_demo.py` from the service root
@@ -37,12 +38,26 @@ def seed() -> None:
             user = User(
                 id="usr_demo_priya",
                 name="Priya",
+                email="priya.demo@example.com",
+                email_verified_at=datetime.now(timezone.utc),
+                country="US",
+                shipping_address={"name": "Priya Demo", "line1": "1 Market St", "city": "San Francisco",
+                                  "region": "CA", "postal_code": "94105", "country": "US"},
             )
             db.add(user)
             db.flush()
             print("Created user usr_demo_priya")
         else:
-            print("User usr_demo_priya already exists, skipping")
+            existing_user = db.get(User, "usr_demo_priya")
+            if not existing_user.email_verified_at or not existing_user.shipping_address:
+                existing_user.email = existing_user.email or "priya.demo@example.com"
+                existing_user.email_verified_at = existing_user.email_verified_at or datetime.now(timezone.utc)
+                existing_user.shipping_address = existing_user.shipping_address or {
+                    "name": "Priya Demo", "line1": "1 Market St", "city": "San Francisco",
+                    "region": "CA", "postal_code": "94105", "country": "US"}
+                print("Gave user usr_demo_priya a verified email and shipping address")
+            else:
+                print("User usr_demo_priya already exists, skipping")
 
         public_key = os.environ.get("AGENT_PUBLIC_KEY", "")
 

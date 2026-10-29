@@ -29,7 +29,8 @@ export function OrderCartItemsTable({ items, currency }: CartItemsTableProps) {
         </thead>
         <tbody>
           {items.map((item: CartItemDetails) => {
-            const lineTotal = calculateLineTotal(item.price, item.qty);
+            const unitPrice = item.unit_price ?? "0.00";
+            const lineTotal = calculateLineTotal(unitPrice, item.qty);
 
             return (
               <tr key={item.product_id} className="border-b border-line last:border-0">
@@ -38,7 +39,7 @@ export function OrderCartItemsTable({ items, currency }: CartItemsTableProps) {
                   <div className="text-xs text-fg-muted font-normal">{item.category}</div>
                 </td>
                 <td className="px-4 py-3 text-sm text-right tabular-nums text-fg-2 align-middle">
-                  {formatCurrency(item.price, currency)}
+                  {formatCurrency(unitPrice, currency)}
                 </td>
                 <td className="px-4 py-3 text-sm text-right tabular-nums text-fg-2 align-middle">
                   {item.qty}

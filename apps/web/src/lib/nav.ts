@@ -3,10 +3,11 @@ import {
   Bot,
   CalendarClock,
   CreditCard,
-  FlaskConical,
   House,
+  MapPin,
   MessagesSquare,
   Receipt,
+  Scale,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -38,11 +39,12 @@ export const NAV: NavSection[] = [
       { href: "/agents", label: "Agents", icon: Bot },
       { href: "/rules", label: "Spending rules", icon: ShieldCheck },
       { href: "/payment", label: "Payment method", icon: CreditCard },
+      { href: "/address", label: "Shipping address", icon: MapPin },
     ],
   },
   {
-    title: "Tools",
-    items: [{ href: "/lab", label: "Attack simulator", icon: FlaskConical }],
+    title: "Support",
+    items: [{ href: "/disputes", label: "Disputes", icon: Scale }],
   },
   {
     title: "In development",

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { makeApiCall } from "@/shared/api/makeApiCall";
+import { AgentKind } from "@/lib/types";
 import { HttpMethodEnum } from "@/shared/enums";
 import { ChatSummaryItem } from "../componentTypes";
 import { IN_PROGRESS_ORDER } from "../constants";
@@ -10,7 +11,7 @@ import { ChatCartState, ChatMessageItem, ChatRuleOption, CartReview } from "../t
 export interface ActiveChatThread {
   id: string;
   title: string;
-  agent: { id: string; name: string } | null;
+  agent: { id: string; name: string; kind: AgentKind } | null;
   rule_id: string | null;
   rule_options: ChatRuleOption[];
   rules: ChatRuleOption[];
@@ -31,6 +32,7 @@ interface MandateRow {
 
 interface AgentRow {
   id: string;
+  kind: AgentKind;
   managed: boolean;
   revoked_at: string | null;
 }
@@ -71,12 +73,12 @@ export function useChatSessions(activeChatId: string | null = null) {
         makeApiCall<MandateRow[]>({ endpoint: "/api/me/mandates", method: HttpMethodEnum.Get, silent: true }),
         makeApiCall<AgentRow[]>({ endpoint: "/api/me/agents", method: HttpMethodEnum.Get, silent: true }),
       ]).then(([mandates, agents]) => {
-        const hosted = new Set((Array.isArray(agents) ? agents : []).filter((a) => a.managed && !a.revoked_at).map((a) => a.id));
+        const kindById = new Map((Array.isArray(agents) ? agents : []).filter((a) => a.managed && !a.revoked_at).map((a) => [a.id, a.kind]));
         return (Array.isArray(mandates) ? mandates : [])
-          .filter((m) => !m.revoked_at && hosted.has(m.agent_id))
+          .filter((m) => !m.revoked_at && kindById.has(m.agent_id))
           .map((m) => ({
-            id: m.id, agent_id: m.agent_id, categories: m.categories, merchants: m.merchants, budget: m.budget_amount,
-            remaining: m.budget_amount, period: m.budget_period, currency: m.currency,
+            id: m.id, agent_id: m.agent_id, agent_kind: kindById.get(m.agent_id), categories: m.categories, merchants: m.merchants,
+            budget: m.budget_amount, remaining: m.budget_amount, period: m.budget_period, currency: m.currency,
           }));
       }),
   });
@@ -109,12 +111,15 @@ export function useChatSessions(activeChatId: string | null = null) {
     },
   });
 
-  const createChatMutation = useMutation<ChatSummaryItem, Error, { agentId?: string; ruleId?: string | null }>({
+  const createChatMutation = useMutation<ChatSummaryItem, Error, { ruleId?: string | null; agentKind: AgentKind }>({
     mutationFn: (payload) =>
-      makeApiCall<ChatSummaryItem, { agent_id?: string; mandate_id?: string }>({
+      makeApiCall<ChatSummaryItem, { agent_kind: AgentKind; mandate_id?: string }>({
         endpoint: "/api/me/chats",
         method: HttpMethodEnum.Post,
-        payload: { agent_id: payload.agentId, ...(payload.ruleId ? { mandate_id: payload.ruleId } : {}) },
+        payload: {
+          agent_kind: payload.agentKind,
+          ...(payload.ruleId ? { mandate_id: payload.ruleId } : {}),
+        },
         silent: true,
       }),
     onSuccess: () => {

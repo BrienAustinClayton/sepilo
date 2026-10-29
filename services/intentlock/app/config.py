@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     # Operator key for the older open routes (/mandates, /orders, /lab …). Unset = those routes are closed.
     ADMIN_API_KEY: Optional[str] = None
 
+    # Dispute managers: comma-separated emails. Signing in with one of these makes the user a dispute manager.
+    DISPUTE_MANAGER_EMAILS: Optional[str] = None
+
+    # Sepilo deal agent: open-web product search and page re-checks
+    FIRECRAWL_API_KEY: Optional[str] = None
+
     # ------------------------------------------------------------------ #
     # Runtime (not in MANIFEST)
     # ------------------------------------------------------------------ #

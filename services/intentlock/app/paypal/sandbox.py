@@ -41,6 +41,7 @@ from paypalserversdk.models.paypal_payment_token_usage_type import PaypalPayment
 from paypalserversdk.models.paypal_wallet import PaypalWallet
 from paypalserversdk.models.paypal_wallet_stored_credential import PaypalWalletStoredCredential
 from paypalserversdk.models.purchase_unit_request import PurchaseUnitRequest
+from paypalserversdk.models.refund_request import RefundRequest
 from paypalserversdk.models.setup_token_request import SetupTokenRequest
 from paypalserversdk.models.setup_token_request_payment_source import (
     SetupTokenRequestPaymentSource,
@@ -431,6 +432,30 @@ def void(authorization_id: str, request_id: str | None = None) -> None:
             return None
         raise
     return None
+
+
+def refund(capture_id: str, amount: Decimal, currency: str, request_id: str) -> str:
+    _check_aid(capture_id)
+    if not isinstance(currency, str) or not _CUR_RE.fullmatch(currency):
+        raise PayPalError("CURRENCY_MISMATCH")
+    value = Decimal(str(amount)).quantize(CENT)
+    if value <= 0:
+        raise PayPalError("INVALID_AMOUNT")
+    ref = _call(
+        "refund",
+        lambda c: c.payments.refund_captured_payment(
+            {
+                "capture_id": capture_id,
+                "paypal_request_id": request_id,
+                "prefer": "return=representation",
+                "body": RefundRequest(amount=Money(currency_code=currency, value=f"{value:.2f}")),
+            }
+        ),
+    ).body
+    st = str(getattr(ref, "status", "") or "").upper()
+    if st in ("COMPLETED", "PENDING") and getattr(ref, "id", None):
+        return ref.id
+    raise PayPalError(_code(f"REFUND_{st or 'UNKNOWN'}"))
 
 
 def get_authorization_status(authorization_id: str) -> str:
