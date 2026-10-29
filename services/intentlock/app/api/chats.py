@@ -279,7 +279,7 @@ def send_message(chat_id: str, body: MessageIn, user: User = Depends(current_use
                      "Add one under Spending rules (categories, stores and a budget) and ask again.")
     else:
         try:
-            data = (deals.suggest(db, body.content, history, rules) if agent.kind == "deals"
+            data = (deals.suggest(db, user.id, body.content, history, rules) if agent.kind == "deals"
                     else hosted_agents.suggest(agent.id, body.content, history, rules))
             products = _clean_products(data.get("products"))
             text = guard_reply(data.get("reply")) or (

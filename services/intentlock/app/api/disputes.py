@@ -202,10 +202,15 @@ def _typed_total_or_422(total, typed: str | None) -> None:
 @router.post("/{dispute_id}/decision")
 def decide(dispute_id: str, body: DisputeDecision, manager: User = Depends(require_dispute_manager),
            db: Session = Depends(get_db)):
-    d = db.execute(select(Dispute).where(Dispute.id == dispute_id).with_for_update()).scalar_one_or_none()
+    order_id = db.execute(select(Dispute.order_id).where(Dispute.id == dispute_id)).scalar_one_or_none()
+    if order_id is None:
+        raise _err(404, "not_found", "dispute not found")
+    order = db.execute(select(Order).where(Order.id == order_id).with_for_update()
+                       .execution_options(populate_existing=True)).scalar_one()
+    d = db.execute(select(Dispute).where(Dispute.id == dispute_id).with_for_update()
+                   .execution_options(populate_existing=True)).scalar_one_or_none()
     if d is None:
         raise _err(404, "not_found", "dispute not found")
-    order = db.execute(select(Order).where(Order.id == d.order_id).with_for_update()).scalar_one()
     if order.user_id == manager.id or d.user_id == manager.id:
         raise _err(403, "forbidden", "You can't decide a dispute on your own order.")
     if d.status != "open":

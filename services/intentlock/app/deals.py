@@ -45,6 +45,8 @@ SCAN_CHUNK = 4_000
 SCAN_STEP = 3_500
 MAX_PRICE_CANDIDATES = 6
 MAX_TITLE_CANDIDATES = 4
+MAIN_PRICE_CANDIDATES = 2
+RECHECK_SCOPE = "recheck"
 EVIDENCE_RADIUS = 80
 TOP_DEALS = 4
 RISK_DROP = 25
@@ -258,8 +260,8 @@ def canonical_url(url: str) -> str:
     return urlunsplit((p.scheme.lower(), (p.hostname or "").lower(), p.path.rstrip("/") or "/", urlencode(query), ""))
 
 
-def product_id_for(url: str) -> str:
-    return "web_" + hashlib.sha256(canonical_url(url).encode()).hexdigest()[:24]
+def product_id_for(url: str, user_id: str) -> str:
+    return "web_" + hashlib.sha256(f"{user_id}|{canonical_url(url)}".encode()).hexdigest()[:24]
 
 
 def _agent_directed(text: str) -> bool:
@@ -332,7 +334,7 @@ def _evidence(text: str, links: list[str], merchant: str) -> tuple[str, float] |
     return snippet, round(min(strength, 1.0), 2)
 
 
-def analyse(page: dict[str, Any]) -> dict[str, Any]:
+def analyse(page: dict[str, Any], user_id: str) -> dict[str, Any]:
     """Offer candidate facts from one page, or _Reject with a plain reason."""
     url = page["url"]
     merchant = domain_of(urlsplit(url).hostname)
@@ -360,9 +362,16 @@ def analyse(page: dict[str, Any]) -> dict[str, Any]:
     if not titles:
         raise _Reject("has no usable title")
     image = next((meta[k] for k in META_IMAGE_KEYS if meta.get(k, "").startswith("https://")), None)
-    return {"url": canonical_url(url), "product_id": product_id_for(url), "merchant": merchant, "text": text,
+    return {"url": canonical_url(url), "product_id": product_id_for(url, user_id), "merchant": merchant, "text": text,
             "window": window, "prices": prices, "titles": titles, "evidence": evidence[0], "strength": evidence[1],
             "image": image}
+
+
+def _is_main_price(price: Decimal, prices: list[tuple[Decimal, str]], meta: dict[str, str]) -> bool:
+    listed = next((_money(meta[k]) for k in META_PRICE_KEYS if k in meta and _money(meta[k]) is not None), None)
+    if listed is not None:
+        return price == listed
+    return price in [p for p, _ in prices[:MAIN_PRICE_CANDIDATES]]
 
 
 def recheck(offer: WebOffer) -> str | None:
@@ -372,11 +381,11 @@ def recheck(offer: WebOffer) -> str | None:
     except HostedAgentError as e:
         return e.message if e.code == "deals_budget" else f"Couldn't re-check {offer.merchant} right now. Try again in a minute."
     try:
-        found = analyse(page)
+        found = analyse(page, RECHECK_SCOPE)
     except _Reject as e:
         return (f"{offer.merchant}'s page {e.reason} any more." if e.reason == NO_PAYPAL
                 else f"{offer.merchant}'s page {e.reason}, so Sepilo won't buy from it.")
-    if not price_in_text(Decimal(offer.price), found["text"]):
+    if not _is_main_price(Decimal(offer.price), found["prices"], page["meta"]):
         return f"The price of {offer.title[:60]} changed on {offer.merchant}; it's no longer ${Decimal(offer.price):.2f}."
     return None
 
@@ -521,7 +530,7 @@ def _save(db: Session, offers: list[dict[str, Any]]) -> None:
     db.commit()
 
 
-def suggest(db: Session, message: str, history: list[dict], rules: list[dict]) -> dict[str, Any]:
+def suggest(db: Session, user_id: str, message: str, history: list[dict], rules: list[dict]) -> dict[str, Any]:
     """Chat answer for the Deal Finder: {"reply", "products"} in the shape the chat route cleans."""
     plan = _plan(db, message, history)
     query = clean(plan.query, 80) or clean(message, 80)
@@ -537,7 +546,7 @@ def suggest(db: Session, message: str, history: list[dict], rules: list[dict]) -
     cands: dict[str, dict[str, Any]] = {}
     for p in search_pages(db, f"{query} buy online PayPal"):
         try:
-            c = analyse(p)
+            c = analyse(p, user_id)
         except _Reject as e:
             log.info("deals.page_dropped reason=%s", e.reason)
             continue
