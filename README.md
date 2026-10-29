@@ -25,7 +25,7 @@ captures.
 
 ## How It Works
 
-Every `POST /checkout` travels a 9-step pipeline. Seven of the nine steps are security
+Every `POST /checkout` travels a 10-step pipeline. Eight of the ten steps are security
 checks; the other two are PayPal authorize and capture/void.
 
 | Step | What it does | Decision gate |
@@ -37,12 +37,35 @@ checks; the other two are PayPal authorize and capture/void.
 | 5. intent_diff | Jev per-line: does this cart match the signed request text? | hold if any line unexplained |
 | 6. graph_risk | NetworkX fraud graph — shared keys, bot farms, flagged merchants | void if score >= 60 |
 | 7. decide | Code policy (`app/policy.py`) — first-match, fail-safe rules | capture / hold / void / reject |
-| 8. capture_or_void | PayPal capture or void the authorization | final payment state |
-| 9. build_proof | Signed Proof of Intent bundle (Ed25519, canonical JSON) | stored and verifiable |
+| 8. preflight | 32 payment checks (`app/preflight.py`), run only when decide says capture | any failure turns capture into hold |
+| 9. capture_or_void | PayPal capture or void the authorization | final payment state |
+| 10. build_proof | Signed Proof of Intent bundle (Ed25519, canonical JSON) | stored and verifiable |
 
 **Fail-safe:** if any AI check is missing, errors, or returns malformed output, the
 order holds for human review. LLM/Jev outputs only set boolean flags; the `decide()`
-function in code makes the final call.
+function in code makes the final call. The payment preflight (below) is pure code, no
+LLM, and can only turn a capture into a hold.
+
+### Payment preflight
+
+`services/intentlock/app/preflight.py` holds 32 named checks (P01-P32). They run after
+`decide` when the decision is capture, and again when a user approves a held order (the
+AI warnings P26-P29 then count as *accepted*, because the user reviewed them; every other
+check must still pass). Any failure holds the order. P32 emails the user a payment notice
+just before payment (`app/notify.py`); if the email cannot be sent, the order holds.
+
+| Group | Checks |
+|---|---|
+| Identity | P01 Agent signature verified, P02 Agent is active, P03 Agent belongs to the buyer |
+| Intent | P04 Request matches buyer and agent, P05 Request is signed, P06 Request signed within 24 hours |
+| Rules | P07 Spending rule check passed, P08 An active spending rule covers this order, P09 Store allowed, P10 Item categories allowed, P11 Within budget, P12 Currency matches |
+| Cart | P13 Order total within the per-order limit, P14 Cart is well formed, P15 Line totals add up, P16 Cart matches what you approved, P17 No other open order for this request, P18 Not a duplicate of a recent payment |
+| Limits | P19 Agent under its daily order limit, P20 Within your daily spending limit |
+| Account and address | P21 Verified email on file, P22 Shipping address on file, P23 Shipping address is complete, P24 Shipping country matches your country |
+| Payment | P25 Payment authorization exists |
+| AI results | P26 No prompt injection found, P27 Order matches your request, P28 Store risk is low, P29 No price anomaly |
+| Pages and offers | P30 Store pages use HTTPS, P31 Store and offer are verifiable (web offers need proof the store accepts PayPal) |
+| Notice | P32 Payment notice emailed to you |
 
 ---
 
@@ -53,14 +76,22 @@ graph TD
     Browser["Browser / Next.js\napps/web"] -->|REST| API["FastAPI\nservices/intentlock"]
     API -->|RFC 9421 verify| SigCheck["crypto/http_sig.py"]
     API -->|mandate check| Mandates["mandates.py"]
-    API -->|9-step pipeline| Pipeline["pipeline/core.py"]
+    API -->|10-step pipeline| Pipeline["pipeline/core.py"]
     Pipeline -->|authorize / capture / void| PayPal["PayPal Orders v2\n(mock; Sandbox planned)"]
     Pipeline -->|page HTML| Injection["checks/injection.py\n+ Jev + llama-guard"]
     Pipeline -->|per-line| IntentDiff["checks/intent_diff.py\n+ Jev"]
     Pipeline -->|fraud signals| Graph["packages/graph\nNetworkX"]
     Pipeline -->|policy| Policy["policy.py (code)"]
+    Pipeline -->|32 checks, capture to hold only| Preflight["preflight.py"]
+    Preflight -->|payment notice| Notify["notify.py (email)"]
     Pipeline -->|signed bundle| Proof["proof/sign.py (Ed25519)"]
     API -->|Channel3 API + cache| Catalog["channel3.py"]
+    API -->|Deal Finder| Deals["deals.py"]
+    Deals -->|search + page text| Firecrawl["Firecrawl"]
+    Deals -->|merchant risk, ranking| Graph
+    API -->|dispute triage + refund| Disputes["disputes.py"]
+    Disputes -->|advice| Jev["Jev"]
+    Disputes -->|refund| PayPal
     Graph -->|/graph/ask| Groq["Groq gpt-oss-120b"]
 ```
 
@@ -79,8 +110,11 @@ Code in `services/intentlock/app/policy.py`. First match wins.
 | 5 | any line unexplained OR 30 <= score <= 59 OR price anomaly | **hold** (30 min) | |
 | 6 | all clean, score < 30 | **capture** | |
 | 7 | hold unanswered for 30 min | **void** | approval timer |
+| 8 | decision is capture but any of the 32 preflight checks fails | **hold** | after decide |
 
-Fail-safe: missing / error / malformed check always becomes **hold**. Void wins over
+Preflight (rule 8) runs only on a capture and can only turn it into a hold: it never
+creates a capture, and a preflight error also holds. Fail-safe: missing / error /
+malformed check always becomes **hold**. Void wins over
 a missing check (rules 3 and 4 are evaluated first when the relevant check is
 well-formed).
 
@@ -88,7 +122,9 @@ well-formed).
 
 ## Attack Lab Scenarios
 
-`POST /lab/{scenario}` runs a fully signed, repeatable scenario end-to-end.
+`POST /lab/{scenario}` runs a fully signed, repeatable scenario end-to-end. It needs the
+operator key (`ADMIN_API_KEY`) and is used by tests and operators; the Attack simulator
+page in the web app was removed.
 All 6 match their expected decisions.
 
 | Scenario | Expected | What triggers it |
@@ -100,7 +136,35 @@ All 6 match their expected decisions.
 | `bot_farm` | void | Graph score >= 60 (5 recent orders from the same key) |
 | `revoked_agent` | reject | Agent revoked before checkout |
 
-Open `/lab` in the Next.js UI to run and inspect each scenario interactively.
+Seed the fixtures with `scripts/load_lab.py`, then call the endpoint with the operator key.
+
+---
+
+## Agents, Deals, Disputes and Shipping Address
+
+**Agents.** There is no "create agent". Every user gets two hosted agents
+(`ensure_default_agents` in `services/intentlock/app/hosted_agents.py`): **Sepilo
+Shopper**, which shops the Channel3 catalog, and **Sepilo Deal Finder**, which searches the
+open web through Firecrawl. A new chat picks one of them.
+
+**Deal Finder** (`app/deals.py`). Firecrawl search, then code-first extraction: a page
+becomes an offer only if it is https, the USD price literally appears in the page text, and
+there is PayPal evidence (page text, `paypal.com` links, or a known PayPal store). Hidden
+text and text aimed at an AI agent are dropped. Offers are ranked by Graph RAG
+(query, offer, merchant, PayPal evidence) using merchant risk from `packages/graph`.
+At checkout, `web_` offers are re-read fresh (`app/product_truth.py`) and must still show
+the stored price and PayPal.
+
+**Disputes** (`app/disputes.py`, `app/api/disputes.py`). Users can dispute a paid order
+within 60 days: one open dispute per order, at most 5 a day. Dispute managers are the
+verified emails listed in `DISPUTE_MANAGER_EMAILS`. Code computes a priority and a
+suggestion; Jev probabilities advise, with a rules fallback if Jev fails. A decision locks
+the rows, cannot be made on your own order, refunds the order total through PayPal
+idempotently, and emails the user.
+
+**Shipping address** (`app/api/address.py`). `GET/PUT /me/address`; changing it needs a
+fresh sign-in and sends the user an email notice. Preflight P22-P24 require a complete
+address in the user's country before any payment.
 
 ---
 
@@ -115,8 +179,9 @@ Open `/lab` in the Next.js UI to run and inspect each scenario interactively.
 
 # 2. Copy env template and fill credentials
 cp services/intentlock/.env.example services/intentlock/.env
-# Edit .env: DATABASE_URL, CHANNEL3_API_KEY, LLM_SMART_KEY, LLM_FAST_KEY,
-#            INTENTLOCK_PROOF_PRIVATE_KEY, INTENTLOCK_WALLET_PRIVATE_KEY, WEB_ORIGIN
+# Edit .env: DATABASE_URL, CHANNEL3_API_KEY, FIRECRAWL_API_KEY, LLM_SMART_KEY, LLM_FAST_KEY,
+#            INTENTLOCK_PROOF_PRIVATE_KEY, INTENTLOCK_WALLET_PRIVATE_KEY, WEB_ORIGIN,
+#            DISPUTE_MANAGER_EMAILS (comma-separated; leave empty for no dispute managers)
 
 # 3. Install Python deps and migrate
 cd services/intentlock
@@ -138,8 +203,8 @@ cd ../..
 pnpm install
 pnpm --filter web dev
 
-# 7. Open the Attack Lab
-open http://localhost:3000/lab
+# 7. Open the app
+open http://localhost:3000
 ```
 
 ---
@@ -156,7 +221,8 @@ Planned configuration:
 - **Worker:** Render Background Worker for the 30-min approval timeout job
 - **Web:** Vercel or Render Static Site (Next.js)
 
-Set env vars per `.env.example`; set `PAYPAL_MODE=sandbox` once the real PayPal
+Set env vars per `.env.example` (including `FIRECRAWL_API_KEY` for the Deal Finder and
+`DISPUTE_MANAGER_EMAILS` for the dispute queue); set `PAYPAL_MODE=sandbox` once the real PayPal
 Sandbox credentials are ready.
 
 ---
@@ -239,8 +305,16 @@ calls the Channel3 search and product APIs, caches results in the `catalog_cache
 (TTL: 1 hour), and surfaces `GET /catalog?merchant=&category=&q=` to the store and
 agents. Price anomaly detection in `app/checks/intent_diff_rules.py` compares cart unit
 prices against Channel3 offer prices to flag overpriced items. The three merchants are
-`freshmart`, `gadgethub`, and `dealsdaily`. Note: the `groceries` category in Channel3
+`freshmart`, `gadgethub`, and `dealsdaily`. Open-web deals come from Firecrawl instead
+(see Agents, Deals, Disputes and Shipping Address). Note: the `groceries` category in Channel3
 contains toddler food products; Channel3 has no adult grocery category.
+
+### Firecrawl
+
+The Deal Finder (`services/intentlock/app/deals.py`) uses Firecrawl for web search and
+page text (`FIRECRAWL_API_KEY`); the API never fetches store URLs itself. Search results
+are cached for six hours and calls are capped per day. Page text is treated as untrusted
+data, and `web_` offers are re-read through Firecrawl at checkout.
 
 ### LLMs — Jev + Groq
 
@@ -283,8 +357,7 @@ backend API, Postgres instance, and background worker is planned.
 
 The Mastra-based shopping agent project lives in `apps/agent/`. Astropods is the planned
 agent runtime. The `astropods_trace_id` field is reserved in the Proof of Intent bundle
-(`services/intentlock/app/proof/bundle.py`). **Not yet deployed.** The Attack Lab today
-uses direct API calls from the Next.js UI instead.
+(`services/intentlock/app/proof/bundle.py`). **Not yet deployed.**
 
 ### AG Studio
 
